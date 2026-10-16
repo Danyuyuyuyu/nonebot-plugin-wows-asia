@@ -58,6 +58,14 @@ class TypeRow:
 
 
 @dataclass
+class TierRow:
+    tier: int
+    battles: int
+    wins: int
+    damage: int
+
+
+@dataclass
 class TotalView:
     who: Identity
     created_at: int | None
@@ -67,6 +75,7 @@ class TotalView:
     divisions: list[tuple[str, int, int]]
     records: list[tuple[str, int, str]]
     generated_at: int
+    tiers: list[TierRow] = field(default_factory=list)
 
 
 @dataclass
@@ -122,6 +131,7 @@ def build_total(who: Identity, account: dict, ships: list[dict] | None, infos: d
     random = parse_stat(pvp_raw) or Stat()
     ranked = parse_stat(stats.get("rank_solo"))
     by_type: dict[str, TypeRow] = {}
+    by_tier = {t: TierRow(t, 0, 0, 0) for t in range(1, 12)}
     for ship in ships or []:
         s = parse_stat(ship.get("pvp"))
         if not s or not s.battles:
@@ -131,6 +141,12 @@ def build_total(who: Identity, account: dict, ships: list[dict] | None, infos: d
         row.battles += s.battles
         row.wins += s.wins
         row.damage += s.damage
+        info = infos.get(ship["ship_id"])
+        if info and info.tier in by_tier:
+            tr = by_tier[info.tier]
+            tr.battles += s.battles
+            tr.wins += s.wins
+            tr.damage += s.damage
     types = sorted(by_type.values(), key=lambda r: (TYPE_ORDER.index(r.name), -r.battles))
     divisions = []
     for key, label in (("pvp_solo", "单野"), ("pvp_div2", "双排"), ("pvp_div3", "三排")):
@@ -149,8 +165,13 @@ def build_total(who: Identity, account: dict, ships: list[dict] | None, infos: d
         sid = num(pvp_raw.get(skey))
         name = ship_label(infos.get(sid), sid)[0] if sid and sid in infos else ""
         records.append((label, value, name))
+    tiers = [by_tier[t] for t in range(1, 12)]
+    if not any(t.battles for t in tiers):
+        tiers = []
+    elif not by_tier[11].battles:
+        tiers = tiers[:10]  # only show XI when the player owns superships
     return TotalView(who, num(account.get("created_at")), random, ranked if ranked and ranked.battles else None,
-                     types, divisions, records, now)
+                     types, divisions, records, now, tiers)
 
 
 def total_ship_ids(account: dict, ships: list[dict] | None) -> list[int]:

@@ -23,15 +23,11 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .row{display:flex;align-items:center;position:relative}
 .tag{font-size:14px;font-weight:700;letter-spacing:2px;color:#B4426C;background:rgba(255,255,255,.7);padding:5px 12px;border-radius:999px}
 .stamp{margin-left:auto;font-size:13px;color:#B4426C;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.55)}
-.ident{display:flex;align-items:center;gap:22px;margin-top:22px;position:relative}
-.avatar{position:relative;width:96px;height:96px;flex-shrink:0}
-.avatar .ring{width:96px;height:96px;border-radius:50%;background:linear-gradient(150deg,#FFB3CB,#C9B8FF);padding:4px}
-.avatar .in{width:100%;height:100%;border-radius:50%;background:#FFF7FA;display:grid;place-items:center;font-size:30px;font-weight:800;color:#E0628C}
-.avatar svg{position:absolute;left:38px;top:-20px}
+.ident{display:flex;align-items:center;gap:22px;margin-top:20px;position:relative}
 .who{min-width:0;flex:1}
-.name{font-size:34px;font-weight:800;letter-spacing:-.5px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.name{font-size:36px;font-weight:800;letter-spacing:-.3px;line-height:1.4;padding-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .clan{color:#8C7BD8;margin-right:10px}
-.meta{font-size:15px;color:#86788A;margin-top:8px}.meta b{color:#3B2F3A;font-weight:600}
+.meta{font-size:15px;color:#86788A;margin-top:4px;line-height:1.5}.meta b{color:#3B2F3A;font-weight:600}
 .title{margin-left:auto;text-align:right;flex-shrink:0}
 .title h1{margin:0;font-size:30px;font-weight:800;color:#B4426C;letter-spacing:2px}
 .title .bubble{display:inline-block;margin-top:10px;background:#fff;border-radius:14px 14px 4px 14px;padding:8px 14px;font-size:14px;color:#B4426C;box-shadow:0 2px 8px rgba(180,66,108,.10)}
@@ -52,18 +48,25 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .sec span{margin-left:auto;font-size:13px;color:#86788A}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .ships .s{display:grid;gap:12px;align-items:center;padding:7px 0;border-bottom:1px dashed #F1E2E9}.ships .s:last-child{border:0}
-.sn{font-size:16px;font-weight:700;line-height:1.2;min-width:0}.sn small{display:block;font-size:12px;color:#86788A;font-weight:400;margin-top:3px}
+.sn{font-size:16px;font-weight:700;line-height:1.35;min-width:0}.sn small{display:block;font-size:12px;color:#86788A;font-weight:400;margin-top:3px}
 .wr{text-align:right;font-size:16px;font-weight:800}
 .tchip{display:inline-block;font-size:12px;font-weight:700;color:#fff;padding:1px 7px;border-radius:5px;margin-right:6px;vertical-align:1px}
 .wbar{position:relative;height:12px;background:#F2EEF2;border-radius:6px}
 .wbar span{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:#8C7BD8}
 .wbar .m50{position:absolute;left:50%;top:-4px;bottom:-4px;width:2px;background:#3B2F3A;opacity:.35}
+.tiers{display:grid;grid-template-columns:repeat(11,1fr);gap:10px;align-items:end}
+.tc{text-align:center;min-width:0}.tc .b{font-size:12px;color:#86788A;line-height:1.4;white-space:nowrap}
+.tc .col{height:120px;display:flex;align-items:flex-end;justify-content:center;margin-top:4px}
+.tc .col span{display:block;width:30px;border-radius:7px 7px 3px 3px;background:linear-gradient(180deg,#B8A9F0,#8C7BD8)}
+.tc .col span.z{background:#F2EEF2;height:4px!important}
+.tc .t{font-size:15px;font-weight:800;margin-top:8px;line-height:1.3;border-top:1px solid #F1E2E9;padding-top:6px}
+.tc .w{font-size:13px;font-weight:700;line-height:1.4}.tc .w.lo{color:#86788A;font-weight:500}
 .cmp{width:100%;border-collapse:collapse;font-size:15px}
 .cmp th{font-size:13px;color:#86788A;font-weight:500;text-align:right;padding:4px 0 8px}.cmp th:first-child{text-align:left}
 .cmp td{padding:5px 0;text-align:right;font-weight:700;border-top:1px dashed #F1E2E9}.cmp td:first-child{text-align:left;font-weight:400;color:#86788A}
-.strip{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid #F1E2E9;border-radius:16px;background:#fff}
+.strip{display:grid;border:1px solid #F1E2E9;border-radius:16px;background:#fff}
 .strip>div{padding:12px 16px;border-right:1px dashed #F1E2E9;min-width:0}.strip>div:last-child{border:0}
-.strip .l{font-size:13px;color:#86788A}.strip .v{font-size:21px;font-weight:800;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.strip .v small{font-size:13px;font-weight:500;color:#86788A;margin-left:6px}
+.strip .l{font-size:13px;color:#86788A}.strip .v{font-size:21px;font-weight:800;margin-top:2px;line-height:1.45;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.strip .v small{font-size:13px;font-weight:500;color:#86788A;margin-left:6px}
 .bt{display:grid;grid-template-columns:64px 52px 210px 1fr 64px 72px 64px;gap:12px;align-items:center;padding:10px 0;border-bottom:1px dashed #F1E2E9}
 .bt:last-child{border-bottom:0}
 .bt.hd{padding:4px 0 8px;font-size:12px;color:#86788A}.bt.hd div:nth-child(n+5){text-align:right}
@@ -89,10 +92,6 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .state-foot{padding:0 36px 20px}
 """
 
-AHOGE = ('<svg width="34" height="30" viewBox="0 0 34 30"><path d="M6 28 C4 14 14 4 28 6 C20 9 15 16 16 28" '
-         'fill="#FFB3CB" stroke="#E98AAE" stroke-width="1.5"/></svg>')
-
-
 def e(value) -> str:
     return escape(str(value), quote=True)
 
@@ -114,12 +113,10 @@ def page(body: str) -> str:
 
 
 def header(who: Identity, title: str, bubble: str, sub: str, stamp_text: str) -> str:
-    initial = e((who.nickname or "?")[0].upper())
     clan = f'<span class="clan">[{e(who.clan)}]</span>' if who.clan else ""
     return f'''<div class="head"><div class="dots"></div>
 <div class="row"><span class="tag">WoWS · ASIA</span><span class="stamp">{e(stamp_text)}</span></div>
-<div class="ident"><div class="avatar">{AHOGE}<div class="ring"><div class="in">{initial}</div></div></div>
-<div class="who"><div class="name">{clan}{e(who.nickname)}</div>
+<div class="ident"><div class="who"><div class="name">{clan}{e(who.nickname)}</div>
 <div class="meta">账号 ID <b>{who.account_id}</b> · 亚服 · {e(sub)}</div></div>
 <div class="title"><h1>{e(title)}</h1><div class="bubble">{e(bubble)}</div></div></div></div>'''
 
@@ -193,7 +190,7 @@ def total_html(v: TotalView) -> str:
     body += "</div></div>"
     if v.types:
         tot = sum(t.battles for t in v.types) or 1
-        band = "".join(f'<span style="width:{t.battles / tot * 100:.2f}%;background:{TYPE_COLOR[t.name]}"></span>' for t in v.types)
+        band = "".join(f'<span style="flex:{t.battles} 0 0;min-width:6px;background:{TYPE_COLOR[t.name]}"></span>' for t in v.types)
         rows = ""
         for t in v.types:
             wr = t.wins / t.battles * 100 if t.battles else 0
@@ -202,6 +199,8 @@ def total_html(v: TotalView) -> str:
 <div class="wr">{wr:.1f}% <span style="font-size:12px;color:{SUB};font-weight:400">· 场均伤害 {t.damage / t.battles / 1000:.1f}k</span></div></div>'''
         body += '<div class="sec"><h2>舰种表现</h2><span>色带为使用占比 · 条形为胜率（0–100%，竖线为 50%）</span></div>'
         body += f'<div class="panel" style="padding:16px 20px 6px"><div style="display:flex;height:20px;border-radius:10px;overflow:hidden;gap:3px">{band}</div><div class="ships" style="margin-top:4px">{rows}</div></div>'
+    if v.tiers:
+        body += _tiers(v.tiers)
     rk = v.ranked
     def cell(stat: Stat | None, fn) -> str:
         return fn(stat) if stat and stat.battles else "—"
@@ -220,13 +219,38 @@ def total_html(v: TotalView) -> str:
     body += f'''<div class="two"><div><div class="sec"><h2>随机 vs 排位</h2><span>生涯累计</span></div><div class="panel" style="padding:12px 20px 8px;height:216px">{table}</div></div>
 <div><div class="sec"><h2>组队表现</h2><span>随机战斗胜率</span></div><div class="panel" style="padding:4px 20px 12px;height:216px">{div_html}</div></div></div>'''
     if v.records:
-        body += '<div class="strip" style="margin-top:20px">'
+        body += f'<div class="strip" style="margin-top:20px;grid-template-columns:repeat({len(v.records)},1fr)">'
         for label, value, ship in v.records:
             small = f"<small>{e(ship)}</small>" if ship else ""
             body += f'<div><div class="l">{label}</div><div class="v">{value:,}{small}</div></div>'
         body += "</div>"
     body += foot("总战绩 · 生涯累计", v.generated_at) + "</div>"
     return page(f'<div class="card">{h}{body}</div>')
+
+
+def _tiers(tiers: list) -> str:
+    peak = max((t.battles for t in tiers), default=0) or 1
+    total = sum(t.battles for t in tiers) or 1
+    cols = ""
+    for t in tiers:
+        if t.battles:
+            h = max(t.battles / peak * 120, 6)
+            wr = t.wins / t.battles * 100
+            bar = f'<span style="height:{h:.0f}px"></span>'
+            w = f'<div class="w" style="color:{WIN if wr >= 50 else SUB}">{wr:.1f}%</div>'
+            b = f"{t.battles:,}"
+        else:
+            bar, w, b = '<span class="z"></span>', '<div class="w lo">—</div>', "0"
+        cols += f'<div class="tc"><div class="b">{b}</div><div class="col">{bar}</div><div class="t">{roman_t(t.tier)}</div>{w}</div>'
+    top = max(tiers, key=lambda t: t.battles)
+    hi = sum(t.battles for t in tiers if t.tier >= 8) / total * 100
+    return (f'<div class="sec"><h2>等级分布</h2><span>柱高为场数 · 下方为该等级胜率 · 最常玩 {roman_t(top.tier)} 级 · VIII 级及以上占 {hi:.0f}%</span></div>'
+            f'<div class="panel" style="padding:16px 20px 14px"><div class="tiers" style="grid-template-columns:repeat({len(tiers)},1fr)">{cols}</div></div>')
+
+
+def roman_t(tier: int) -> str:
+    from .views import roman
+    return roman(tier)
 
 
 # ---------------- recent ----------------

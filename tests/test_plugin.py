@@ -337,3 +337,17 @@ def test_plugin_loaded():
     import nonebot
     plugin = nonebot.get_plugin("nonebot_plugin_wows_asia")
     assert plugin and plugin.metadata.name == "WoWS 亚服战绩"
+
+
+async def test_tier_distribution_and_no_avatar():
+    fake, clock, storage, tracker, app = make_env(renderer=HtmlRenderer())
+    from .fakes import SHIPS_INFO
+    SHIPS_INFO[2] = {**SHIPS_INFO[2], "tier": 8}
+    try:
+        assert await app.handle(USER, "Example_Player") == b"PNG"
+        html = app.renderer.html[-1]
+        assert "等级分布" in html and "repeat(10,1fr)" in html and "avatar" not in html
+        text = await WowsApp(app.api, storage, None, tracker=tracker, cache_seconds=0, clock=clock).handle(USER, "Example_Player")
+        assert "等级：VIII 300　X 700" in text
+    finally:
+        SHIPS_INFO[2] = {**SHIPS_INFO[2], "tier": 10}

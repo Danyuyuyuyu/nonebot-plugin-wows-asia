@@ -1,6 +1,6 @@
 """Plain-text fallbacks (used when image rendering is disabled or fails)."""
 from .cards import n0, pct
-from .views import RecentView, StateView, TotalView
+from .views import RecentView, StateView, TotalView, roman
 
 
 def candidates_text(candidates: list[dict]) -> str:
@@ -25,6 +25,8 @@ def total_text(v: TotalView) -> str:
              f"存活率：{pct(s.survival, 2)}｜主炮命中率：{pct(s.hit_rate, 2)}"]
     if v.types:
         lines.append("舰种：" + "　".join(f"{t.name} {t.battles} 场 {t.wins / t.battles * 100:.1f}%" for t in v.types))
+    if v.tiers:
+        lines.append("等级：" + "　".join(f"{roman(t.tier)} {t.battles}" for t in v.tiers if t.battles))
     if v.ranked:
         lines.append(f"排位：{v.ranked.battles:,} 场｜胜率 {pct(v.ranked.win_rate)}")
     for label, value, ship in v.records:
