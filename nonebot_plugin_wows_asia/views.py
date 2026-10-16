@@ -1,0 +1,239 @@
+"""Turn raw WG data + local records into display-ready view models (no HTML here)."""
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from .api import ShipInfo
+from .stats import Stat, num, parse_stat
+from .storage import Record
+
+CST = timezone(timedelta(hours=8))
+TYPE_CN = {"Battleship": "战列舰", "Cruiser": "巡洋舰", "Destroyer": "驱逐舰", "AirCarrier": "航母",
+           "Submarine": "潜艇"}
+TYPE_ORDER = ["战列舰", "巡洋舰", "驱逐舰", "航母", "潜艇", "其他"]
+ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI"]
+MODE_CN = {"pvp": "随机", "rank_solo": "排位"}
+
+
+def clean(value: Any, limit: int = 40) -> str:
+    return "".join(c for c in str(value) if c.isprintable())[:limit]
+
+
+def day_of(ts: int):
+    return datetime.fromtimestamp(ts, CST).date()
+
+
+def fmt_time(ts: int, pattern: str = "%H:%M") -> str:
+    return datetime.fromtimestamp(ts, CST).strftime(pattern)
+
+
+def roman(tier: int) -> str:
+    return ROMAN[tier] if 0 < tier < len(ROMAN) else "?"
+
+
+@dataclass
+class Identity:
+    account_id: int
+    nickname: str
+    clan: str = ""
+
+
+@dataclass
+class StateView:
+    kind: str  # hidden | tracking | idle | newbie | quota
+    card_title: str
+    who: Identity
+    sub: str
+    heading: str
+    text: str
+    tip: str
+
+
+@dataclass
+class TypeRow:
+    name: str
+    battles: int
+    wins: int
+    damage: int
+
+
+@dataclass
+class TotalView:
+    who: Identity
+    created_at: int | None
+    random: Stat
+    ranked: Stat | None
+    types: list[TypeRow]
+    divisions: list[tuple[str, int, int]]
+    records: list[tuple[str, int, str]]
+    generated_at: int
+
+
+@dataclass
+class BattleRow:
+    time: str
+    time_end: str
+    mode: str
+    ship: str
+    ship_type: str
+    tier: str
+    stat: Stat
+    career_avg_damage: float | None
+
+
+@dataclass
+class DayGroup:
+    label: str
+    stat: Stat
+    rows: list[BattleRow]
+
+
+@dataclass
+class RecentView:
+    who: Identity
+    start: str
+    end: str
+    summary: Stat
+    prev_battles: int | None
+    tracking_since: str
+    career: Stat
+    days: list[tuple[str, Stat | None]]  # None = not tracked yet that day
+    groups: list[DayGroup]
+    hidden_rows: int
+    generated_at: int
+    notes: list[str] = field(default_factory=list)
+
+
+def ship_label(info: ShipInfo | None, ship_id: int) -> tuple[str, str, str]:
+    if info is None:
+        return f"未知战舰 {ship_id}", "其他", "?"
+    return clean(info.name, 24), TYPE_CN.get(info.type, "其他"), roman(info.tier)
+
+
+def career_random(account: dict) -> Stat:
+    stats = account.get("statistics") if isinstance(account.get("statistics"), dict) else {}
+    return parse_stat(stats.get("pvp")) or Stat()
+
+
+def build_total(who: Identity, account: dict, ships: list[dict] | None, infos: dict[int, ShipInfo],
+                now: int) -> TotalView:
+    stats = account.get("statistics") if isinstance(account.get("statistics"), dict) else {}
+    pvp_raw = stats.get("pvp") if isinstance(stats.get("pvp"), dict) else {}
+    random = parse_stat(pvp_raw) or Stat()
+    ranked = parse_stat(stats.get("rank_solo"))
+    by_type: dict[str, TypeRow] = {}
+    for ship in ships or []:
+        s = parse_stat(ship.get("pvp"))
+        if not s or not s.battles:
+            continue
+        _, tname, _ = ship_label(infos.get(ship["ship_id"]), ship["ship_id"])
+        row = by_type.setdefault(tname, TypeRow(tname, 0, 0, 0))
+        row.battles += s.battles
+        row.wins += s.wins
+        row.damage += s.damage
+    types = sorted(by_type.values(), key=lambda r: (TYPE_ORDER.index(r.name), -r.battles))
+    divisions = []
+    for key, label in (("pvp_solo", "单野"), ("pvp_div2", "双排"), ("pvp_div3", "三排")):
+        block = stats.get(key) if isinstance(stats.get(key), dict) else None
+        b = num(block.get("battles")) if block else None
+        if b:
+            divisions.append((label, b, num(block.get("wins")) or 0))
+    records = []
+    for label, vkey, skey in (("单场最高伤害", "max_damage_dealt", "max_damage_dealt_ship_id"),
+                              ("单场最高击沉", "max_frags_battle", "max_frags_ship_id"),
+                              ("单场最高经验", "max_xp", "max_xp_ship_id"),
+                              ("单场最高侦察", "max_scouting_damage", "max_scouting_damage_ship_id")):
+        value = num(pvp_raw.get(vkey))
+        if value is None:
+            continue
+        sid = num(pvp_raw.get(skey))
+        name = ship_label(infos.get(sid), sid)[0] if sid and sid in infos else ""
+        records.append((label, value, name))
+    return TotalView(who, num(account.get("created_at")), random, ranked if ranked and ranked.battles else None,
+                     types, divisions, records, now)
+
+
+def total_ship_ids(account: dict, ships: list[dict] | None) -> list[int]:
+    ids = [s["ship_id"] for s in ships or [] if isinstance(s.get("pvp"), dict) and num(s["pvp"].get("battles"))]
+    stats = account.get("statistics") if isinstance(account.get("statistics"), dict) else {}
+    pvp = stats.get("pvp") if isinstance(stats.get("pvp"), dict) else {}
+    for key in ("max_damage_dealt_ship_id", "max_frags_ship_id", "max_xp_ship_id", "max_scouting_damage_ship_id"):
+        sid = num(pvp.get(key))
+        if sid:
+            ids.append(sid)
+    return list(dict.fromkeys(ids))
+
+
+def build_recent(who: Identity, career: Stat, records: list[Record], infos: dict[int, ShipInfo],
+                 baseline_at: int, now: int, max_rows: int = 12) -> RecentView:
+    today = day_of(now)
+    days7 = [today - timedelta(days=i) for i in range(6, -1, -1)]
+    start7 = days7[0]
+    base_day = day_of(baseline_at)
+    in7 = [r for r in records if day_of(r.captured_at) >= start7]
+    prev = [r for r in records if start7 - timedelta(days=7) <= day_of(r.captured_at) < start7]
+    summary = sum((r.stat for r in in7), Stat())
+    prev_battles = sum(r.stat.battles for r in prev) if base_day <= start7 - timedelta(days=7) else None
+    per_day: dict = {}
+    for r in in7:
+        d = day_of(r.captured_at)
+        per_day[d] = per_day.get(d, Stat()) + r.stat
+    days = [(d.strftime("%m-%d"), per_day.get(d, Stat()) if d >= base_day else None) for d in days7]
+    groups, shown = [], 0
+    hidden = 0
+    for d, label in ((today, f"今天 {today:%m-%d}"), (today - timedelta(days=1), f"昨天 {today - timedelta(days=1):%m-%d}")):
+        recs = [r for r in in7 if day_of(r.captured_at) == d]
+        if not recs:
+            continue
+        rows = []
+        for r in recs:
+            if shown >= max_rows:
+                hidden += 1
+                continue
+            name, tname, tier = ship_label(infos.get(r.ship_id), r.ship_id)
+            rows.append(BattleRow(fmt_time(r.captured_at), fmt_time(r.prev_at) if r.stat.battles > 1 and day_of(r.prev_at) == day_of(r.captured_at) else "",
+                                  MODE_CN.get(r.mode, r.mode), name, tname, tier, r.stat, r.career_avg_damage))
+            shown += 1
+        groups.append(DayGroup(label, sum((r.stat for r in recs), Stat()), rows))
+    start = max(start7, base_day)
+    return RecentView(who, start.strftime("%Y-%m-%d"), today.strftime("%m-%d"), summary, prev_battles,
+                      fmt_time(baseline_at, "%m-%d %H:%M"), career, days, groups, hidden, now)
+
+
+# ---- state cards ----
+def state_hidden(who: Identity, title: str) -> StateView:
+    return StateView("hidden", title, who, "战绩未公开", "该玩家隐藏了战绩",
+                     "对方在游戏设置中关闭了公开战绩，WG 接口只返回昵称和账号 ID，无法读取任何统计数据。",
+                     "如果是你自己的账号：在游戏设置中关闭“隐藏战绩”，稍后再查询即可。")
+
+
+def state_tracking(who: Identity, baseline_at: int, poll_minutes: int) -> StateView:
+    return StateView("tracking", "最近战绩", who, f"开始记录 · {fmt_time(baseline_at, '%Y-%m-%d %H:%M')}",
+                     "还没有足够的近期数据",
+                     f"已保存第一份战绩快照。之后每约 {poll_minutes} 分钟检查一次，有新战斗就会记下每一场的数据。",
+                     "现在可以先用 /wows 查看总战绩；打几场之后再查最近战绩就能看到场次明细。")
+
+
+def state_idle(who: Identity, baseline_at: int) -> StateView:
+    return StateView("idle", "最近战绩", who, f"记录中 · 自 {fmt_time(baseline_at, '%m-%d')} 起",
+                     "近 7 天没有新战斗", "最近 7 天里没有记录到随机或排位战斗。",
+                     "出海打几场之后再来查吧～ 总战绩可以用 /wows 查看。")
+
+
+def state_quota(who: Identity) -> StateView:
+    return StateView("quota", "最近战绩", who, "暂未记录", "追踪名额已满",
+                     "机器人记录的玩家数量已到上限，暂时不能为这个账号开始记录。",
+                     "绑定的账号不受名额限制：/wows 绑定 昵称；或请管理员调大 WOWS_MAX_TRACKED。")
+
+
+def state_newbie(who: Identity, random: Stat, threshold: int) -> StateView:
+    parts = []
+    if random.win_rate is not None:
+        parts.append(f"胜率 {random.win_rate:.1f}%")
+    if random.battles:
+        parts.append(f"场均伤害 {random.damage / random.battles:,.0f}")
+        parts.append(f"场均击沉 {random.frags / random.battles:.2f}")
+    tip = "基础数据：" + " · ".join(parts) + f" · 打满 {threshold} 场后显示完整卡片" if parts else \
+        f"还没有随机战斗记录，打满 {threshold} 场后显示完整卡片。"
+    return StateView("newbie", "总战绩", who, f"随机 {random.battles} 场", "场数还比较少",
+                     f"随机战斗目前只有 {random.battles} 场，胜率和场均数据波动很大，暂不展示舰种和组队分析。", tip)
