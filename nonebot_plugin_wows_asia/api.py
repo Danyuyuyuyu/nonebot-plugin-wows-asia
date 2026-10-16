@@ -88,8 +88,11 @@ class WowsApi:
 
     def _http(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
+            # trust_env=False：不要吃宿主进程的 http_proxy/https_proxy/all_proxy。
+            # WG 的 application_id 可配 IP 白名单，走代理时出口 IP 变成代理节点，
+            # 会被 WG 判为 INVALID_IP_ADDRESS；直连才是白名单里的服务器出口 IP。
             self._client = httpx.AsyncClient(timeout=self.timeout, transport=self.transport,
-                                             follow_redirects=False)
+                                             follow_redirects=False, trust_env=False)
         return self._client
 
     async def close(self) -> None:
@@ -132,6 +135,12 @@ class WowsApi:
                 raise ApiRejected(f"WG application_id 缺失、无效或不可用，请联系管理员检查配置（code={code}）。", code)
             if "LIMIT_EXCEEDED" in code:
                 raise ApiRejected(f"WG API 已限制请求频率或额度，请稍后再试（code={code}）。", code)
+            if code == "INVALID_IP_ADDRESS":
+                raise ApiRejected(
+                    f"WG 认为服务器出口 IP 不在该 application_id 的白名单内（code={code}）："
+                    "请检查机器人进程是否经过代理，或在 WG 开发者后台把当前出口 IP 加进白名单。",
+                    code,
+                )
             raise ApiRejected(
                 f"WG API 拒绝了查询（code={code or 'UNKNOWN'}），请稍后重试或联系管理员检查 API 配置。", code
             )
