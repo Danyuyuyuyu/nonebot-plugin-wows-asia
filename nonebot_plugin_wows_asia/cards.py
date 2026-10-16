@@ -39,7 +39,7 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .kpi{position:relative;background:#fff;border:1px solid #F1E2E9;border-radius:16px;padding:14px 16px}
-.ico{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:10px;display:grid;place-items:center}
+.kico{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:10px;display:grid;place-items:center}
 .sico{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;margin-right:6px;vertical-align:-5px}
 .kpi .l{font-size:14px;color:#86788A}.kpi .v{font-size:28px;font-weight:800;margin-top:4px;letter-spacing:-.5px}
 .kpi .d{font-size:13px;margin-top:2px;color:#86788A}.up{color:#2E9468!important}.down{color:#C2536A!important}
@@ -166,7 +166,7 @@ KPI_ICONS = {"战斗场数": ("anchor", LAV), "场均伤害": ("burst", PINK), "
          "单场最高侦察": ("eye", LAV)}
 
 
-def icon(label: str, size: int = 18, cls: str = "ico") -> str:
+def icon(label: str, size: int = 18, cls: str = "kico") -> str:
     if label not in KPI_ICONS:
         return ""
     name, color = KPI_ICONS[label]

@@ -359,4 +359,10 @@ async def test_unknown_ships_hidden_and_kpi_icons():
     fake.ships.append({"ship_id": 999, "pvp": stat(33, 23, 10, 600000, 10, 33000, 9)})
     assert await app.handle(USER, "Example_Player") == b"PNG"
     html = app.renderer.html[-1]
-    assert ">其他<" not in html and html.count('class="ico"') == 6 and html.count('class="sico"') == 4
+    assert ">其他<" not in html and html.count('class="kico"') == 6 and html.count('class="sico"') == 4
+
+
+def test_state_icon_not_absolute():
+    who = views.Identity(AID, "P", "")
+    html = cards.state_html(views.state_tracking(who, 1792130400, 10), 1792130400)
+    assert 'class="ico"' in html and ".ico{position:absolute" not in html

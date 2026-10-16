@@ -1,9 +1,9 @@
-# 测试报告 v0.2.3
+# 测试报告 v0.2.4
 
 环境：Python 3.13、nonebot2 2.5.0、nonebot-plugin-alconna 0.62.1、apscheduler 0.5.0、localstore 0.7.4、
 nonebug、nonebot-adapter-onebot、系统 Chromium（Playwright 驱动）。
 
-`pytest`：**53 passed**（WG API 全部为本地模拟，无真实 application_id）。
+`pytest`：**54 passed**（WG API 全部为本地模拟，无真实 application_id）。
 
 覆盖：
 - 指令解析：总战绩/最近/绑定/解绑/帮助/我、id 校验（全角数字、0、超长）、昵称长度与逗号。
