@@ -18,7 +18,7 @@ NEUTRAL_CLAN_COLOR = "#B3B3B3"
 _STAT = ("battles", "wins", "losses", "draws", "damage_dealt", "frags", "xp", "survived_battles",
          "main_battery.hits", "main_battery.shots")
 _MAX = ("max_damage_dealt", "max_damage_dealt_ship_id", "max_frags_battle", "max_frags_ship_id",
-        "max_xp", "max_xp_ship_id", "max_scouting_damage", "max_scouting_damage_ship_id")
+        "max_xp", "max_xp_ship_id", "max_damage_scouting", "max_scouting_damage_ship_id")
 ACCOUNT_BASE_FIELDS = ("account_id", "nickname", "hidden_profile", "created_at", "last_battle_time",
                        "stats_updated_at")
 ACCOUNT_FIELDS = ",".join(
