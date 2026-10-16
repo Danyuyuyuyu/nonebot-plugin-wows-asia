@@ -1,5 +1,6 @@
 """HTML card templates (rendered to PNG by renderer.py). All external strings are escaped."""
 import math
+import re
 from datetime import datetime
 from html import escape
 
@@ -26,7 +27,7 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .ident{display:flex;align-items:center;gap:22px;margin-top:20px;position:relative}
 .who{min-width:0;flex:1}
 .name{font-size:36px;font-weight:800;letter-spacing:-.3px;line-height:1.4;padding-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.clan{color:#8C7BD8;margin-right:10px}
+.clan{margin-right:10px}
 .meta{font-size:15px;color:#86788A;margin-top:4px;line-height:1.5}.meta b{color:#3B2F3A;font-weight:600}
 .title{margin-left:auto;text-align:right;flex-shrink:0}
 .title h1{margin:0;font-size:30px;font-weight:800;color:#B4426C;letter-spacing:2px}
@@ -116,12 +117,25 @@ def page(body: str) -> str:
     return f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>{CSS}</style></head><body>{body}</body></html>'
 
 
+def _ink(hex_color: str, factor: float = .78) -> str:
+    """Darken a clan colour so pale league colours stay readable on the pink header."""
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return "#{:02X}{:02X}{:02X}".format(*(int(c * factor) for c in (r, g, b)))
+
+
 def header(who: Identity, title: str, bubble: str, sub: str, stamp_text: str) -> str:
-    clan = f'<span class="clan">[{e(who.clan)}]</span>' if who.clan else ""
+    color = who.clan_color if re.fullmatch(r"#[0-9A-Fa-f]{6}", who.clan_color or "") else "#B3B3B3"
+    clan = f'<span class="clan" style="color:{_ink(color)}">[{e(who.clan)}]</span>' if who.clan else ""
+    if who.clan:
+        parts = [p for p in (who.clan_name, who.clan_league) if p]
+        clan_meta = (f'<span style="color:{_ink(color, .62)};font-weight:700">{e(" · ".join(parts))}</span> · '
+                     if parts else "")
+    else:
+        clan_meta = "无军团 · "
     return f'''<div class="head"><div class="dots"></div>
 <div class="row"><span class="tag">WoWS · ASIA</span><span class="stamp">{e(stamp_text)}</span></div>
 <div class="ident"><div class="who"><div class="name">{clan}{e(who.nickname)}</div>
-<div class="meta">账号 ID <b>{who.account_id}</b> · 亚服 · {e(sub)}</div></div>
+<div class="meta">账号 ID <b>{who.account_id}</b> · 亚服 · {clan_meta}{e(sub)}</div></div>
 <div class="title"><h1>{e(title)}</h1><div class="bubble">{e(bubble)}</div></div></div></div>'''
 
 

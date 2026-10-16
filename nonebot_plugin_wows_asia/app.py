@@ -123,8 +123,12 @@ class WowsApp:
         return data
 
     async def _identity(self, account_id: int, account: dict) -> views.Identity:
-        return views.Identity(account_id, views.clean(account.get("nickname") or account_id, 32),
-                              views.clean(await self.api.clan_tag(account_id), 8))
+        nickname = views.clean(account.get("nickname") or account_id, 32)
+        clan = await self.api.clan_info(account_id)
+        if clan is None:
+            return views.Identity(account_id, nickname)
+        return views.Identity(account_id, nickname, views.clean(clan.tag, 8), views.clean(clan.name, 40),
+                              clan.color, views.clean(clan.league, 16))
 
     def _state(self, state: views.StateView) -> Card:
         return Card(cards.state_html(state, self.now()), formatting.state_text(state))

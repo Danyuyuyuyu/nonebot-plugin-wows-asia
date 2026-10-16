@@ -50,8 +50,19 @@ class FakeWG:
         self.search = [{"account_id": AID, "nickname": "Example_Player"}]
         self.reject_extra = False
         self.clan = "NYAN"
+        self.ladder = {"league": 4, "division": 3, "battles_count": 12, "season_number": 35, "color": "#b3b3b3"}
+        self.clan_color = "#cc9966"
+        self.ladder_status = 200
 
     def handler(self, request: httpx.Request):
+        if request.url.host == "clans.worldofwarships.asia":
+            self.calls.append((request.url.path, dict(request.url.params)))
+            if "application_id" in request.url.params:
+                return httpx.Response(400)
+            if self.ladder_status != 200:
+                return httpx.Response(self.ladder_status)
+            return httpx.Response(200, json={"clanview": {"clan": {"tag": self.clan, "color": self.clan_color},
+                                                           "wows_ladder": self.ladder}})
         path = request.url.path.split("/wows/", 1)[1]
         params = dict(request.url.params)
         self.calls.append((path, params))
@@ -71,7 +82,8 @@ class FakeWG:
         if path == "encyclopedia/ships/":
             return ok({i: SHIPS_INFO.get(int(i)) for i in params["ship_id"].split(",")})
         if path == "clans/accountinfo/":
-            return ok({str(AID): {"clan": {"tag": self.clan}} if self.clan else None})
+            return ok({str(AID): {"clan_id": 2000021407, "clan": {"tag": self.clan, "name": "楊椿雪樂"}}
+                       if self.clan else None})
         return httpx.Response(404)
 
     def play(self, ship_id, mode="pvp", b=1, w=1, l=0, dmg=100000, fr=2, xp=2000, sv=1, hits=0, shots=0):

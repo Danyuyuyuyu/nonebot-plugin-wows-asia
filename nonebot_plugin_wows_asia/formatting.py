@@ -14,7 +14,8 @@ def candidates_text(candidates: list[dict]) -> str:
 
 def _title(who) -> str:
     clan = f"[{who.clan}]" if who.clan else ""
-    return f"WoWS 亚服｜{clan}{who.nickname}\n账号 ID：{who.account_id}"
+    league = f"｜{who.clan_league}" if who.clan and who.clan_league else ""
+    return f"WoWS 亚服｜{clan}{who.nickname}\n账号 ID：{who.account_id}{league}"
 
 
 def total_text(v: TotalView) -> str:

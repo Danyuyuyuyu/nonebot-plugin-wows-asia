@@ -36,6 +36,9 @@ class Identity:
     account_id: int
     nickname: str
     clan: str = ""
+    clan_name: str = ""
+    clan_color: str = ""
+    clan_league: str = ""
 
 
 @dataclass
@@ -160,7 +163,7 @@ def build_total(who: Identity, account: dict, ships: list[dict] | None, infos: d
     for label, vkey, skey in (("单场最高伤害", "max_damage_dealt", "max_damage_dealt_ship_id"),
                               ("单场最高击沉", "max_frags_battle", "max_frags_ship_id"),
                               ("单场最高经验", "max_xp", "max_xp_ship_id"),
-                              ("单场最高侦察", "max_damage_scouting", "max_scouting_damage_ship_id")):
+                              ("单场最高侦察", "max_scouting_damage", "max_scouting_damage_ship_id")):
         value = num(pvp_raw.get(vkey))
         if value is None:
             continue

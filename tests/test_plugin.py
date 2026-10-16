@@ -139,6 +139,31 @@ async def test_ships_info_cache_and_clan():
     assert await api.clan_tag(AID) == ""
 
 
+async def test_clan_league_colours():
+    fake = FakeWG()
+    api = make_api(fake)
+    info = await api.clan_info(AID)
+    assert (info.tag, info.name, info.color, info.league, info.season) == ("NYAN", "楊椿雪樂", "#CC9966", "暴风 III", 35)
+    n = len(fake.calls)
+    await api.clan_info(AID)
+    assert len(fake.calls) == n + 1  # accountinfo again, ladder cached
+    api._ladder.clear()
+    fake.ladder, fake.clan_color = {"league": 0, "division": 1, "battles_count": 30}, "#cda4ff"
+    assert (await api.clan_info(AID)).league == "飓风"
+    api._ladder.clear()
+    fake.ladder, fake.clan_color = {"league": 4, "division": 2, "battles_count": 0}, "#b3b3b3"
+    info = await api.clan_info(AID)
+    assert info.league == "未参加军团战" and info.color == "#B3B3B3"
+    api._ladder.clear()
+    fake.ladder_status = 503
+    info = await api.clan_info(AID)
+    assert info.tag == "NYAN" and info.league == "" and info.color == "#B3B3B3"
+    api._ladder.clear()
+    fake.ladder_status, fake.ladder = 200, {"league": 1, "division": 2, "battles_count": 5}
+    fake.clan_color = "red;x"
+    assert (await api.clan_info(AID)).color == "#B3B3B3"  # malformed colour never reaches CSS
+
+
 # ---------------- diff ----------------
 def S(**kw):
     return Stat(**kw)
@@ -234,7 +259,7 @@ async def test_total_text_and_help():
     fake, clock, storage, tracker, app = make_env()
     assert "/wows 绑定" in await app.handle(USER, "")
     text = await app.handle(USER, "Example_Player")
-    assert "[NYAN]Example_Player" in text and "1,000 场" in text and "55.00%" in text
+    assert "[NYAN]Example_Player" in text and "1,000 场" in text and "55.00%" in text and "｜暴风 III" in text
     assert "排位" in text and "287,640" in text and "大和" in text
 
 
@@ -299,6 +324,7 @@ async def test_render_fallback_and_escaping():
     fake, clock, storage, tracker, app = make_env(renderer=HtmlRenderer())
     fake.account["nickname"] = "<script>alert(1)</script>"
     fake.clan = "<i>Z"
+    fake.clan_color = "#cda4ff"
     assert await app.handle(USER, "Example_Player") == b"PNG"
     html = app.renderer.html[-1]
     assert "<script>alert" not in html and "&lt;script&gt;" in html and "<i>Z" not in html and "&lt;i&gt;Z" in html
@@ -366,3 +392,15 @@ def test_state_icon_not_absolute():
     who = views.Identity(AID, "P", "")
     html = cards.state_html(views.state_tracking(who, 1792130400, 10), 1792130400)
     assert 'class="ico"' in html and ".ico{position:absolute" not in html
+
+
+
+async def test_header_clan_colour_and_no_clan():
+    fake, clock, storage, tracker, app = make_env(renderer=HtmlRenderer())
+    await app.handle(USER, "Example_Player")
+    html = app.renderer.html[-1]
+    assert 'class="clan" style="color:#9F774F"' in html and "楊椿雪樂 · 暴风 III" in html
+    fake.clan = None
+    await app.handle(USER, "Example_Player")
+    html = app.renderer.html[-1]
+    assert 'class="clan"' not in html and "无军团 · " in html

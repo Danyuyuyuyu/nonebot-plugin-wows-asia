@@ -1,5 +1,6 @@
 """Thin, rate-limited client for the public WG Asia WoWS API (application_id only)."""
 import asyncio
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -9,11 +10,15 @@ import httpx
 from .commands import Query, WowsError
 
 API_BASE = "https://api.worldofwarships.asia/wows/"
+# Official clan portal (undocumented, no application_id). Used only for clan-battle league colour.
+CLANS_BASE = "https://clans.worldofwarships.asia/api/clanbase/"
+LEAGUES = ["飓风", "台风", "风暴", "疾风", "暴风"]
+NEUTRAL_CLAN_COLOR = "#B3B3B3"
 
 _STAT = ("battles", "wins", "losses", "draws", "damage_dealt", "frags", "xp", "survived_battles",
          "main_battery.hits", "main_battery.shots")
 _MAX = ("max_damage_dealt", "max_damage_dealt_ship_id", "max_frags_battle", "max_frags_ship_id",
-        "max_xp", "max_xp_ship_id", "max_damage_scouting", "max_scouting_damage_ship_id")
+        "max_xp", "max_xp_ship_id", "max_scouting_damage", "max_scouting_damage_ship_id")
 ACCOUNT_BASE_FIELDS = ("account_id", "nickname", "hidden_profile", "created_at", "last_battle_time",
                        "stats_updated_at")
 ACCOUNT_FIELDS = ",".join(
@@ -42,6 +47,16 @@ class Resolved:
 
 
 @dataclass(frozen=True)
+class ClanInfo:
+    clan_id: int
+    tag: str
+    name: str
+    color: str = NEUTRAL_CLAN_COLOR
+    league: str = ""  # e.g. "暴风 III"; "" = unknown, "未参加军团战" = no battles this season
+    season: int | None = None
+
+
+@dataclass(frozen=True)
 class ShipInfo:
     ship_id: int
     name: str
@@ -65,6 +80,7 @@ class WowsApi:
         self._rate_lock = asyncio.Lock()
         self._client: httpx.AsyncClient | None = None
         self._ships: dict[int, tuple[float, ShipInfo | None]] = {}
+        self._ladder: dict[int, tuple[float, tuple[str, str, int | None] | None]] = {}
 
     @property
     def configured(self) -> bool:
@@ -73,7 +89,7 @@ class WowsApi:
     def _http(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=self.timeout, transport=self.transport,
-                                             follow_redirects=False, trust_env=False)
+                                             follow_redirects=False)
         return self._client
 
     async def close(self) -> None:
@@ -181,16 +197,65 @@ class WowsApi:
         return [s for s in ships if isinstance(s, dict) and isinstance(s.get("ship_id"), int)]
 
     async def clan_tag(self, account_id: int) -> str:
-        """Best effort; clan info never blocks a stats card."""
+        info = await self.clan_info(account_id)
+        return info.tag if info else ""
+
+    async def clan_info(self, account_id: int) -> ClanInfo | None:
+        """Best effort; clan info never blocks a stats card. None = not in a clan (or lookup failed)."""
         try:
             data = await self.request("clans/accountinfo/", account_id=str(account_id), extra="clan",
-                                      fields="clan.tag")
+                                      fields="clan_id,clan.tag,clan.name")
         except WowsError:
-            return ""
+            return None
         row = data.get(str(account_id)) if isinstance(data, dict) else None
         clan = row.get("clan") if isinstance(row, dict) else None
         tag = clan.get("tag") if isinstance(clan, dict) else None
-        return tag if isinstance(tag, str) else ""
+        if not isinstance(tag, str) or not tag:
+            return None
+        clan_id = row.get("clan_id")
+        name = clan.get("name") if isinstance(clan.get("name"), str) else ""
+        if not isinstance(clan_id, int) or clan_id <= 0:
+            return ClanInfo(0, tag, name)
+        ladder = await self.clan_ladder(clan_id)
+        if ladder is None:
+            return ClanInfo(clan_id, tag, name)
+        color, league, season = ladder
+        return ClanInfo(clan_id, tag, name, color, league, season)
+
+    async def clan_ladder(self, clan_id: int, ttl: float = 3600) -> tuple[str, str, int | None] | None:
+        """(hex colour, league label, season) from the official clan portal; cached, failures -> None."""
+        now = time.monotonic()
+        hit = self._ladder.get(clan_id)
+        if hit and hit[0] > now:
+            return hit[1]
+        result = None
+        try:
+            await self._wait_turn()
+            response = await self._http().get(f"{CLANS_BASE}{clan_id}/claninfo/")
+            payload = response.json() if response.status_code == 200 else None
+            view = payload.get("clanview", payload) if isinstance(payload, dict) else None
+            ladder = view.get("wows_ladder") if isinstance(view, dict) else None
+            clan = view.get("clan") if isinstance(view, dict) else None
+            if isinstance(ladder, dict):
+                # clan.color is the in-game tag colour; wows_ladder.color is not (often neutral grey).
+                color = (clan.get("color") if isinstance(clan, dict) else None) or ladder.get("color")
+                color = color.upper() if isinstance(color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", color) \
+                    else NEUTRAL_CLAN_COLOR
+                season = ladder.get("season_number") if isinstance(ladder.get("season_number"), int) else None
+                league, division = ladder.get("league"), ladder.get("division")
+                if not ladder.get("battles_count"):
+                    result = (NEUTRAL_CLAN_COLOR, "未参加军团战", season)
+                elif isinstance(league, int) and 0 <= league < len(LEAGUES):
+                    label = LEAGUES[league]
+                    if league > 0 and isinstance(division, int) and 1 <= division <= 3:
+                        label += " " + "I" * division
+                    result = (color, label, season)
+                else:
+                    result = (color, "", season)
+        except (httpx.HTTPError, ValueError):
+            result = None
+        self._ladder[clan_id] = (now + (ttl if result else 300), result)
+        return result
 
     async def ships_info(self, ship_ids: list[int], ttl: float = 86400) -> dict[int, ShipInfo]:
         now = time.monotonic()
