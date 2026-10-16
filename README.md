@@ -26,7 +26,7 @@ NoneBot2 战舰世界（WoWS）**亚服**战绩查询插件：图片战绩卡、
 
 **最近战绩卡**：近 7 天汇总（对比生涯）；按天的胜负堆叠柱；最近两天的逐场列表（时间、胜负、战舰、舰种/等级/模式、伤害及与本船生涯场均的对比、击沉、经验、存活）。
 
-卡片不显示头像：WG 公开 API 不提供玩家游戏内头像。
+卡片不显示头像：WG 公开 API 不提供玩家游戏内头像。舰种表现和等级分布不含战舰图鉴中查不到的船（已删除/下架的老船等），其场次仍计入总场数和胜率。
 
 **状态卡**：隐藏战绩、刚开始记录 / 近 7 天无战斗、追踪名额已满、随机场次少于 `WOWS_MIN_BATTLES`（默认 50）的新号。
 
@@ -48,7 +48,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 # 从 GitHub 安装
 pip install "git+https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia.git"
 # 或安装发布的 wheel
-pip install nonebot_plugin_wows_asia-0.2.1-py3-none-any.whl
+pip install nonebot_plugin_wows_asia-0.2.2-py3-none-any.whl
 
 # 安装截图用的 Chromium（Linux 服务器可加 --with-deps 自动装系统依赖）
 playwright install chromium

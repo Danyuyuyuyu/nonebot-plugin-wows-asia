@@ -137,6 +137,8 @@ def build_total(who: Identity, account: dict, ships: list[dict] | None, infos: d
         if not s or not s.battles:
             continue
         _, tname, _ = ship_label(infos.get(ship["ship_id"]), ship["ship_id"])
+        if tname == "其他":
+            continue  # removed/unlisted ships: not shown in type or tier breakdowns
         row = by_type.setdefault(tname, TypeRow(tname, 0, 0, 0))
         row.battles += s.battles
         row.wins += s.wins

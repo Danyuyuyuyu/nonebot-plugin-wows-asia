@@ -1,9 +1,9 @@
-# 测试报告 v0.2.1
+# 测试报告 v0.2.2
 
 环境：Python 3.13、nonebot2 2.5.0、nonebot-plugin-alconna 0.62.1、apscheduler 0.5.0、localstore 0.7.4、
 nonebug、nonebot-adapter-onebot、系统 Chromium（Playwright 驱动）。
 
-`pytest`：**52 passed**（WG API 全部为本地模拟，无真实 application_id）。
+`pytest`：**53 passed**（WG API 全部为本地模拟，无真实 application_id）。
 
 覆盖：
 - 指令解析：总战绩/最近/绑定/解绑/帮助/我、id 校验（全角数字、0、超长）、昵称长度与逗号。
@@ -11,7 +11,7 @@ nonebug、nonebot-adapter-onebot、系统 Chromium（Playwright 驱动）。
 - 快照差值：单场、同船多场合并、数据减少/异常时静默重建基线、新船。
 - Tracker：首次建基线、60 秒最小间隔、`last_battle_time` 未变跳过、WG 数据滞后时保留重试标记、`poll_all` 只在有新战斗时拉取战舰数据、过期清理、名额上限及绑定账号豁免。
 - 应用流程：总战绩、新号/隐藏/查无/候选、绑定→开始记录→打一场→最近战绩逐场、解绑、未绑定提示、名额已满、近 7 天无战斗、渲染失败降级文字、内部异常不泄露信息。
-- 等级分布（数据、文字降级）、卡片不含头像。
+- 等级分布（数据、文字降级）、卡片不含头像、指标图标、未收录战舰不进入舰种/等级分布。
 - 安全：昵称 `<script>`、军团标签 HTML 均被转义。
 - 真实 Chromium 渲染输出有效 PNG；卡片截图逐张目检（总战绩、最近战绩含合并行、5 种状态卡）。
 - 端到端：nonebug + OneBot V11 群消息，图片回复与文字回复；另验证 V11 下图片导出为 `base64://`。

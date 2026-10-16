@@ -351,3 +351,12 @@ async def test_tier_distribution_and_no_avatar():
         assert "等级：VIII 300　X 700" in text
     finally:
         SHIPS_INFO[2] = {**SHIPS_INFO[2], "tier": 10}
+
+
+async def test_unknown_ships_hidden_and_kpi_icons():
+    fake, clock, storage, tracker, app = make_env(renderer=HtmlRenderer())
+    from .fakes import stat
+    fake.ships.append({"ship_id": 999, "pvp": stat(33, 23, 10, 600000, 10, 33000, 9)})
+    assert await app.handle(USER, "Example_Player") == b"PNG"
+    html = app.renderer.html[-1]
+    assert ">其他<" not in html and html.count('class="ico"') == 6 and html.count('class="sico"') == 4

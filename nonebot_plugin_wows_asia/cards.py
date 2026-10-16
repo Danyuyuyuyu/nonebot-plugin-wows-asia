@@ -38,7 +38,9 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .legend{display:flex;gap:14px;margin-top:10px;font-size:14px;color:#86788A;flex-wrap:wrap}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.kpi{background:#fff;border:1px solid #F1E2E9;border-radius:16px;padding:14px 16px}
+.kpi{position:relative;background:#fff;border:1px solid #F1E2E9;border-radius:16px;padding:14px 16px}
+.ico{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:10px;display:grid;place-items:center}
+.sico{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:6px;margin-right:6px;vertical-align:-5px}
 .kpi .l{font-size:14px;color:#86788A}.kpi .v{font-size:28px;font-weight:800;margin-top:4px;letter-spacing:-.5px}
 .kpi .d{font-size:13px;margin-top:2px;color:#86788A}.up{color:#2E9468!important}.down{color:#C2536A!important}
 .meter{height:6px;border-radius:3px;background:#F6E7EE;margin-top:8px;overflow:hidden}.meter span{display:block;height:100%;border-radius:3px;background:#8C7BD8}
@@ -146,10 +148,35 @@ def donut(s: Stat, label: str) -> str:
 <div class="legend"><span><i style="background:{WIN}"></i>胜 {s.wins:,}</span><span><i style="background:{LOSS}"></i>负 {s.losses:,}</span><span><i style="background:{DRAW}"></i>平 {s.draws:,}</span></div></div>'''
 
 
+_I = {
+    # 20x20 stroke icons, drawn inline so the card never loads external assets
+    "anchor": '<circle cx="10" cy="4.5" r="2"/><path d="M10 6.5v10.5M6 10h8M3.5 11.5c.6 3.4 3.3 5.5 6.5 5.5s5.9-2.1 6.5-5.5"/>',
+    "burst": '<path d="M10 2.5l1.6 4.2 4.4-1.6-2 4.1 4 2.2-4.4 1.1.9 4.5-4.5-2.6-4.5 2.6.9-4.5L2 11.4l4-2.2-2-4.1 4.4 1.6z"/>',
+    "cross": '<circle cx="10" cy="10" r="6"/><path d="M10 1.5v4M10 14.5v4M1.5 10h4M14.5 10h4"/><circle cx="10" cy="10" r="1" fill="currentColor"/>',
+    "shield": '<path d="M10 2.5l6 2.3v4.6c0 4-2.6 6.8-6 8.1-3.4-1.3-6-4.1-6-8.1V4.8z"/><path d="M7.3 10l2 2 3.6-3.8"/>',
+    "star": '<path d="M10 2.8l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L2.8 8.1l5-.7z"/>',
+    "target": '<circle cx="10" cy="10" r="7.5"/><circle cx="10" cy="10" r="4.2"/><circle cx="10" cy="10" r="1.2" fill="currentColor"/>',
+    "eye": '<path d="M1.8 10S5 4.5 10 4.5 18.2 10 18.2 10 15 15.5 10 15.5 1.8 10 1.8 10z"/><circle cx="10" cy="10" r="2.6"/>',
+}
+KPI_ICONS = {"战斗场数": ("anchor", LAV), "场均伤害": ("burst", PINK), "场均击沉": ("cross", PINK),
+         "存活率": ("shield", WIN), "场均经验": ("star", "#D9A13B"), "主炮命中率": ("target", LAV),
+         "单场最高伤害": ("burst", PINK), "单场最高击沉": ("cross", PINK), "单场最高经验": ("star", "#D9A13B"),
+         "单场最高侦察": ("eye", LAV)}
+
+
+def icon(label: str, size: int = 18, cls: str = "ico") -> str:
+    if label not in KPI_ICONS:
+        return ""
+    name, color = KPI_ICONS[label]
+    return (f'<span class="{cls}" style="background:{color}1F;color:{color}"><svg width="{size}" height="{size}" '
+            f'viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" '
+            f'stroke-linejoin="round">{_I[name]}</svg></span>')
+
+
 def kpi(label: str, value: str, delta: str = "", cls: str = "", meter: float | None = None) -> str:
     m = f'<div class="meter"><span style="width:{min(max(meter, 0), 100):.1f}%"></span></div>' if meter is not None else ""
     d = f'<div class="d {cls}">{e(delta)}</div>' if delta else ""
-    return f'<div class="kpi"><div class="l">{e(label)}</div><div class="v">{e(value)}</div>{d}{m}</div>'
+    return f'<div class="kpi">{icon(label)}<div class="l">{e(label)}</div><div class="v">{e(value)}</div>{d}{m}</div>'
 
 
 def _delta(cur: float | None, base: float | None, kind: str) -> tuple[str, str]:
@@ -222,7 +249,7 @@ def total_html(v: TotalView) -> str:
         body += f'<div class="strip" style="margin-top:20px;grid-template-columns:repeat({len(v.records)},1fr)">'
         for label, value, ship in v.records:
             small = f"<small>{e(ship)}</small>" if ship else ""
-            body += f'<div><div class="l">{label}</div><div class="v">{value:,}{small}</div></div>'
+            body += f'<div><div class="l">{icon(label, 13, "sico")}{label}</div><div class="v">{value:,}{small}</div></div>'
         body += "</div>"
     body += foot("总战绩 · 生涯累计", v.generated_at) + "</div>"
     return page(f'<div class="card">{h}{body}</div>')
@@ -316,12 +343,13 @@ def _battle_row(r) -> str:
     else:
         alive = f'<span style="color:{WIN}">存活</span>' if s.survived else f'<span style="color:{BAD}">沉没</span>'
     tcolor = TYPE_COLOR.get(r.ship_type, TYPE_COLOR["其他"])
+    chip = f'<span class="tchip" style="background:{tcolor}">{e(r.ship_type)}</span>' if r.ship_type != "其他" else ""
     extra = f" · {s.battles} 场合计" if merged else ""
     tsub = f"<small>{e(r.time_end)}–</small>" if merged and r.time_end else ""
     frags = f"{s.frags / s.battles:.1f}" if merged else f"{s.frags}"
     return f'''<div class="bt{' merged' if merged else ''}"><div class="tm">{tsub}{e(r.time)}</div>
 <div class="res{' m' if merged else ''}" style="background:{col}">{res}</div>
-<div class="sn">{e(r.ship)}<small><span class="tchip" style="background:{tcolor}">{e(r.ship_type)}</span>{e(r.tier)} 级<span class="mtag">{e(r.mode)}{extra}</span></small></div>
+<div class="sn">{e(r.ship)}<small>{chip}{e(r.tier)} 级<span class="mtag">{e(r.mode)}{extra}</span></small></div>
 <div>{bar}<div class="dtx"><b>{dmg:,.0f}</b>{"场均 · " if merged else ""}{cmp}</div></div>
 <div class="num">{frags}<small>{"场均击沉" if merged else "击沉"}</small></div><div class="num">{s.xp / s.battles:,.0f}<small>{"场均经验" if merged else "经验"}</small></div><div class="num" style="font-size:14px">{alive}</div></div>'''
 
