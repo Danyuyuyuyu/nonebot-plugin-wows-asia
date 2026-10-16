@@ -1,4 +1,4 @@
-# 测试报告 v0.2.2
+# 测试报告 v0.2.3
 
 环境：Python 3.13、nonebot2 2.5.0、nonebot-plugin-alconna 0.62.1、apscheduler 0.5.0、localstore 0.7.4、
 nonebug、nonebot-adapter-onebot、系统 Chromium（Playwright 驱动）。

@@ -48,6 +48,8 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .sec h2{margin:0;font-size:19px;font-weight:800}
 .sec h2:before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;background:#E0628C;transform:rotate(45deg);margin-right:12px;vertical-align:2px;box-shadow:0 0 0 3px #FFE3EC}
 .sec span{margin-left:auto;font-size:13px;color:#86788A}
+.sec em{font-style:normal;font-size:12px;font-weight:700;color:#8C7BD8;background:#ECE8FB;border-radius:6px;padding:2px 8px;margin-left:10px;vertical-align:2px}
+.sec.first{margin-top:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .ships .s{display:grid;gap:12px;align-items:center;padding:7px 0;border-bottom:1px dashed #F1E2E9}.ships .s:last-child{border:0}
 .sn{font-size:16px;font-weight:700;line-height:1.35;min-width:0}.sn small{display:block;font-size:12px;color:#86788A;font-weight:400;margin-top:3px}
@@ -205,8 +207,9 @@ def total_html(v: TotalView) -> str:
     bubble = "累计数据整理好啦"
     if s.win_rate is not None and s.win_rate >= 55:
         bubble = "很厉害的舰长呢～"
-    h = header(v.who, "总战绩", bubble, "生涯累计", f"统计于 {stamp(v.generated_at)[5:]}")
-    body = '<div class="body"><div class="hero">' + donut(s, "随机胜率") + '<div class="kpis">'
+    h = header(v.who, "总战绩", bubble, "随机战斗 · 生涯累计", f"统计于 {stamp(v.generated_at)[5:]}")
+    body = ('<div class="body"><div class="sec first"><h2>核心数据<em>随机战斗</em></h2><span>含单野与组队 · 不含人机、行动、军团战、竞技模式与排位</span></div>'
+            '<div class="hero">' + donut(s, "随机胜率")) + '<div class="kpis">'
     created = f"注册于 {datetime.fromtimestamp(v.created_at, CST):%Y-%m-%d}" if v.created_at else ""
     body += kpi("战斗场数", f"{s.battles:,}", created)
     body += kpi("场均伤害", n0(s.per("damage")))
@@ -224,7 +227,7 @@ def total_html(v: TotalView) -> str:
             rows += f'''<div class="s" style="grid-template-columns:200px 1fr 200px"><div class="sn"><span class="tchip" style="background:{TYPE_COLOR[t.name]}">{t.name}</span><small style="display:inline;margin-left:4px">{t.battles:,} 场 · {t.battles / tot * 100:.0f}%</small></div>
 <div><div class="wbar"><span style="width:{wr:.1f}%;background:{TYPE_COLOR[t.name]}"></span><div class="m50"></div></div></div>
 <div class="wr">{wr:.1f}% <span style="font-size:12px;color:{SUB};font-weight:400">· 场均伤害 {t.damage / t.battles / 1000:.1f}k</span></div></div>'''
-        body += '<div class="sec"><h2>舰种表现</h2><span>色带为使用占比 · 条形为胜率（0–100%，竖线为 50%）</span></div>'
+        body += '<div class="sec"><h2>舰种表现<em>随机战斗</em></h2><span>色带为使用占比 · 条形为胜率（0–100%，竖线为 50%）</span></div>'
         body += f'<div class="panel" style="padding:16px 20px 6px"><div style="display:flex;height:20px;border-radius:10px;overflow:hidden;gap:3px">{band}</div><div class="ships" style="margin-top:4px">{rows}</div></div>'
     if v.tiers:
         body += _tiers(v.tiers)
@@ -243,15 +246,16 @@ def total_html(v: TotalView) -> str:
         div_html += f'''<div style="margin:10px 0 12px"><div style="display:flex;font-size:14px"><b>{label}</b><span style="color:{SUB};margin-left:8px">{b:,} 场</span><span style="margin-left:auto;font-weight:800">{wr:.1f}%</span></div>
 <div class="wbar" style="margin-top:7px"><span style="width:{wr:.1f}%"></span><div class="m50"></div></div></div>'''
     div_html = (div_html + f'<div style="font-size:12px;color:{SUB}">0–100% 刻度 · 竖线为 50%</div>') if div_html else '<div class="empty">暂无组队数据</div>'
-    body += f'''<div class="two"><div><div class="sec"><h2>随机 vs 排位</h2><span>生涯累计</span></div><div class="panel" style="padding:12px 20px 8px;height:216px">{table}</div></div>
-<div><div class="sec"><h2>组队表现</h2><span>随机战斗胜率</span></div><div class="panel" style="padding:4px 20px 12px;height:216px">{div_html}</div></div></div>'''
+    body += f'''<div class="two"><div><div class="sec"><h2>随机 vs 排位</h2><span>排位为单人排位赛</span></div><div class="panel" style="padding:12px 20px 8px;height:216px">{table}</div></div>
+<div><div class="sec"><h2>组队表现<em>随机战斗</em></h2><span>胜率</span></div><div class="panel" style="padding:4px 20px 12px;height:216px">{div_html}</div></div></div>'''
     if v.records:
-        body += f'<div class="strip" style="margin-top:20px;grid-template-columns:repeat({len(v.records)},1fr)">'
+        body += '<div class="sec"><h2>单场最高<em>随机战斗</em></h2><span>生涯最佳单场</span></div>'
+        body += f'<div class="strip" style="grid-template-columns:repeat({len(v.records)},1fr)">'
         for label, value, ship in v.records:
             small = f"<small>{e(ship)}</small>" if ship else ""
             body += f'<div><div class="l">{icon(label, 13, "sico")}{label}</div><div class="v">{value:,}{small}</div></div>'
         body += "</div>"
-    body += foot("总战绩 · 生涯累计", v.generated_at) + "</div>"
+    body += foot("总战绩 · 除排位列外均为随机战斗", v.generated_at) + "</div>"
     return page(f'<div class="card">{h}{body}</div>')
 
 
@@ -271,7 +275,7 @@ def _tiers(tiers: list) -> str:
         cols += f'<div class="tc"><div class="b">{b}</div><div class="col">{bar}</div><div class="t">{roman_t(t.tier)}</div>{w}</div>'
     top = max(tiers, key=lambda t: t.battles)
     hi = sum(t.battles for t in tiers if t.tier >= 8) / total * 100
-    return (f'<div class="sec"><h2>等级分布</h2><span>柱高为场数 · 下方为该等级胜率 · 最常玩 {roman_t(top.tier)} 级 · VIII 级及以上占 {hi:.0f}%</span></div>'
+    return (f'<div class="sec"><h2>等级分布<em>随机战斗</em></h2><span>柱高为场数 · 下方为该等级胜率 · 最常玩 {roman_t(top.tier)} 级 · VIII 级及以上占 {hi:.0f}%</span></div>'
             f'<div class="panel" style="padding:16px 20px 14px"><div class="tiers" style="grid-template-columns:repeat({len(tiers)},1fr)">{cols}</div></div>')
 
 
