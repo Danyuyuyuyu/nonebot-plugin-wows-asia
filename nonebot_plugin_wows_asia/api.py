@@ -127,11 +127,14 @@ class WowsApi:
         if payload.get("status") != "ok":
             error = payload.get("error")
             code = str(error.get("message", "")) if isinstance(error, dict) else ""
+            # 错误码要带进提示：原先只特判三类、其余塌缩成同一句话且不写日志，瞬时拒绝无从定位
             if code in {"INVALID_APPLICATION_ID", "APPLICATION_ID_NOT_SPECIFIED", "APPLICATION_IS_BLOCKED"}:
-                raise ApiRejected("WG application_id 缺失、无效或不可用，请联系管理员检查配置。", code)
+                raise ApiRejected(f"WG application_id 缺失、无效或不可用，请联系管理员检查配置（code={code}）。", code)
             if "LIMIT_EXCEEDED" in code:
-                raise ApiRejected("WG API 已限制请求频率或额度，请稍后再试。", code)
-            raise ApiRejected("WG API 拒绝了查询，请稍后重试或联系管理员检查 API 配置。", code)
+                raise ApiRejected(f"WG API 已限制请求频率或额度，请稍后再试（code={code}）。", code)
+            raise ApiRejected(
+                f"WG API 拒绝了查询（code={code or 'UNKNOWN'}），请稍后重试或联系管理员检查 API 配置。", code
+            )
         if "data" not in payload:
             raise WowsError("WG API 返回缺少 data，请稍后再试。")
         return payload["data"]

@@ -53,6 +53,10 @@ class WowsApp:
             card = await (self.recent_card(account_id) if cmd.action == "recent" else self.total_card(account_id))
             return await self._output(card)
         except WowsError as exc:
+            if self.logger:
+                # 只记类型与错误码，不回显异常文本（可能含请求 URL / application_id）
+                code = getattr(exc, "code", "") or "-"
+                self.logger.warning(f"WoWS command failed: {type(exc).__name__} code={code}")
             return str(exc)
         except Exception as exc:
             # Do not log request objects/URLs or echo exception text containing app IDs.
