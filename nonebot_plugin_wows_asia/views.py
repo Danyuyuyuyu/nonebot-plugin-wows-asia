@@ -6,6 +6,7 @@ from typing import Any
 from .api import ShipInfo
 from .stats import Stat, num, parse_stat
 from .storage import Record
+from .ship_names import SHIP_NAMES
 
 CST = timezone(timedelta(hours=8))
 TYPE_CN = {"Battleship": "战列舰", "Cruiser": "巡洋舰", "Destroyer": "驱逐舰", "AirCarrier": "航母",
@@ -130,9 +131,11 @@ def team_label(division: tuple[int, int, int] | None) -> str:
 
 
 def ship_label(info: ShipInfo | None, ship_id: int) -> tuple[str, str, str]:
+    fallback = f"未知战舰 {ship_id}" if info is None else info.name
+    name = SHIP_NAMES.name_for(ship_id, fallback)
     if info is None:
-        return f"未知战舰 {ship_id}", "其他", "?"
-    return clean(info.name, 24), TYPE_CN.get(info.type, "其他"), roman(info.tier)
+        return clean(name, 24), "其他", "?"
+    return clean(name, 24), TYPE_CN.get(info.type, "其他"), roman(info.tier)
 
 
 def career_random(account: dict) -> Stat:

@@ -46,6 +46,7 @@ __plugin_meta__ = PluginMetadata(
                 command="wows",
                 description=(
                     "查询 WoWS 亚服总战绩或最近战绩；AI 调用时把查询参数放入 parts，"
+                    "用户说最近/近期时必须保留“最近”参数，用户说总战绩/生涯时不要添加“最近”；"
                     "不要把 /wows 前缀放进 command。"
                     "如果当前调用身份没有绑定账号，或者插件返回帮助信息/未绑定提示，"
                     "不要重复调用 wows，应先引导用户绑定 WoWS 亚服账号。"
