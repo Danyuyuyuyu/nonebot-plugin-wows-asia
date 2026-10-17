@@ -32,6 +32,8 @@ BATTLES_WORDS = {"场次", "战斗", "battles"}
 BATTLE_WORDS = {"单场", "battle"}
 SHIP_WORDS = {"单船", "战舰", "ship"}
 HELP_WORDS = {"help", "--help", "帮助"}
+# “wows 生涯 张三” / “wows 张三 总战绩”: the default card anyway, so these words are just dropped
+TOTAL_WORDS = {"总战绩", "生涯", "生涯战绩", "总", "战绩", "总览", "全部战绩"}
 
 
 class WowsError(Exception):
@@ -123,7 +125,7 @@ def _parse_ship(parts: list[str]) -> Command:
             ship = _ship_name(m.group(1))
         elif tok in ("随机", "随机战", "随机战斗", "排位", "排位赛"):
             mode = _MODE_WORDS[tok][0]
-        elif tok.lower() not in SELF_WORDS:
+        elif tok.lower() not in SELF_WORDS and tok.lower() not in TOTAL_WORDS:
             rest.append(tok)
     if ship is None:
         if not rest:
@@ -270,6 +272,7 @@ def parse_command(raw: str) -> Command:
             raise WowsError("用法：/wows 绑定 完整昵称，或 /wows 绑定 id 账号ID")
         return Command("bind", _target(rest))
     if head in RECENT_WORDS:
+        rest = [p for p in rest if p != "战绩"]  # “最近 战绩”
         if not rest or (len(rest) == 1 and rest[0].lower() in SELF_WORDS):
             return Command("recent")
         return Command("recent", _target(rest))
@@ -281,6 +284,7 @@ def parse_command(raw: str) -> Command:
         return _parse_ship(rest)
     if any(_SHIP_EQ.fullmatch(p) for p in parts):  # “张三 船=大和” reads as that ship's career
         return _parse_ship(parts)
-    if len(parts) == 1 and head in SELF_WORDS:
+    words = [p for p in parts if p.lower() not in TOTAL_WORDS]
+    if not words or (len(words) == 1 and words[0].lower() in SELF_WORDS):
         return Command("total")
-    return Command("total", _target(parts))
+    return Command("total", _target(words))

@@ -179,6 +179,9 @@ class WowsApi:
     async def resolve(self, query: Query) -> Resolved:
         if query.kind == "id":
             return Resolved(account_id=int(query.value))
+        if len(query.value) < 3:  # WG rejects shorter searches (NOT_ENOUGH_SEARCH_LENGTH); nicknames are 3+ chars
+            raise WowsError(f"没有叫“{query.value}”的玩家：WoWS 昵称至少 3 个字符，请写完整昵称；"
+                            "查自己不用写昵称，也可以用 /wows id 账号ID。")
         exact = await self._search(query.value, "exact")
         matches = [p for p in exact if p["nickname"].casefold() == query.value.casefold()]
         if len(matches) == 1:

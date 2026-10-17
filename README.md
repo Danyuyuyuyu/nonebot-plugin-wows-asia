@@ -10,7 +10,7 @@ NoneBot2 战舰世界（WoWS）**亚服**战绩查询插件：图片战绩卡、
 
 | 指令 | 说明 |
 | --- | --- |
-| `/wows 玩家昵称` | 总战绩卡（随机战斗生涯） |
+| `/wows 玩家昵称` | 总战绩卡（随机战斗生涯；写成 `/wows 生涯 昵称`、`/wows 昵称 总战绩` 也行） |
 | `/wows id 账号ID` | 按账号 ID 查询（纯数字昵称仍按昵称处理） |
 | `/wows 绑定 昵称`（或 `绑定 id 账号ID`） | 绑定自己的账号，并立即开始记录快照 |
 | `/wows` / `/wows 我` | 查自己的总战绩（需先绑定） |
@@ -88,7 +88,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 # 从 GitHub 安装
 pip install "git+https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia.git"
 # 或安装发布的 wheel
-pip install nonebot_plugin_wows_asia-0.3.2-py3-none-any.whl
+pip install nonebot_plugin_wows_asia-0.3.3-py3-none-any.whl
 
 # 安装截图用的 Chromium（Linux 服务器可加 --with-deps 自动装系统依赖）
 playwright install chromium

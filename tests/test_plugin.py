@@ -36,6 +36,11 @@ USER = "OneBot V11:10001"
     ("绑定 Foo", Command("bind", Query("name", "Foo"))),
     ("bind id 0042", Command("bind", Query("id", "42"))),
     ("解绑", Command("unbind")),
+    ("生涯", Command("total")),
+    ("总战绩 我", Command("total")),
+    ("生涯 Foo_Bar", Command("total", Query("name", "Foo_Bar"))),
+    ("Foo_Bar 总战绩", Command("total", Query("name", "Foo_Bar"))),
+    ("最近 战绩", Command("recent")),
 ])
 def test_parse_command(raw, expected):
     assert parse_command(raw) == expected
@@ -825,3 +830,11 @@ async def test_ship_card_history_and_hidden():
     fake.account = account(hidden=True)
     app._cache.clear()
     assert "隐藏了战绩" in (await app.handle("u1", "单船 岛风"))
+
+
+async def test_short_nickname_is_rejected_before_search():
+    fake, clock, storage, tracker, app = make_env()
+    reply = await app.handle("u1", "Pi")
+    assert "昵称至少 3 个字符" in reply and "NOT_ENOUGH" not in reply
+    assert not any(path == "account/list/" for path, _ in fake.calls)
+    assert parse_command("单船 大和 生涯").target is None
