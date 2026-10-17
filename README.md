@@ -37,8 +37,9 @@ NoneBot2 战舰世界（WoWS）**亚服**战绩查询插件：图片战绩卡、
 WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船的累计数据快照，两次快照之间的差值就是这段时间打的战斗：
 
 - 只能记录**开始记录之后**的战斗。绑定账号或第一次查询 `/wows 最近 某人` 时开始记录，之前的场次查不到。
-- 定时任务每 `WOWS_POLL_MINUTES` 分钟先批量检查 `last_battle_time`，有变化才拉取战舰数据，请求量很小。
-- 同一艘船在两次快照之间打了多场时只能合并成一行显示（灰底，标注“N 场合计”，数值为场均）。显示的时间是快照时间，可能比实际结束晚几分钟。
+- 定时任务先批量检查 `last_battle_time`，有变化才拉取战舰数据，请求量很小。**已绑定、还没建立基线或 2 小时内打过战斗**的账号每 `WOWS_FAST_POLL_MINUTES`（默认 3）分钟检查一次，其余账号每 `WOWS_POLL_MINUTES`（默认 10）分钟一次。一局最长约 20 分钟，3 分钟间隔下两次快照之间基本只有一场，差值就是准确的单场数据。
+- 同一艘船在两次快照之间打了多场时只能合并成一行显示（灰底，数值为场均）。显示的时间是快照时间，可能比实际结束晚几分钟。
+- 随机战斗会标注**单野 / 双排 / 三排**（对比每船 `pvp_solo` / `pvp_div2` / `pvp_div3` 场数的差值得到）；合并行显示各自场数，如“单野1 双排1”。升级到 0.2.6 之前记录的场次没有这项信息。
 - 记录随机（pvp）和单人排位（rank_solo）；行动、剧情等模式不计入。
 - 绑定账号会一直记录；未绑定账号在 `WOWS_TRACK_DAYS` 天内没人查询就停止记录；逐场记录保留 `WOWS_RECORD_DAYS` 天。
 
@@ -50,7 +51,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 # 从 GitHub 安装
 pip install "git+https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia.git"
 # 或安装发布的 wheel
-pip install nonebot_plugin_wows_asia-0.2.5-py3-none-any.whl
+pip install nonebot_plugin_wows_asia-0.2.6-py3-none-any.whl
 
 # 安装截图用的 Chromium（Linux 服务器可加 --with-deps 自动装系统依赖）
 playwright install chromium
@@ -77,6 +78,7 @@ plugins = ["nonebot_plugin_wows_asia"]
 | `WOWS_RENDER_SCALE` | `1.5` | 截图倍率（1–3），越大越清晰、图片越大 |
 | `WOWS_BROWSER_PATH` | 空 | 使用系统已有 Chromium/Chrome 的可执行文件路径 |
 | `WOWS_POLL_MINUTES` | `10` | 快照检查间隔（3–720 分钟） |
+| `WOWS_FAST_POLL_MINUTES` | `3` | 已绑定 / 最近在打的账号的检查间隔（0–60 分钟；0 或不小于上一项时关闭） |
 | `WOWS_TRACK_DAYS` | `14` | 未绑定账号多少天无人查询后停止记录 |
 | `WOWS_MAX_TRACKED` | `200` | 最多同时记录的账号数（绑定账号不受限） |
 | `WOWS_RECORD_DAYS` | `30` | 逐场记录保留天数（≥15） |

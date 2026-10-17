@@ -4,11 +4,12 @@ from dataclasses import dataclass
 
 from .api import WowsApi
 from .commands import WowsError
-from .stats import Stat, num, ship_states
+from .stats import DIV_MODES, Stat, num, ship_states
 from .storage import Record, Storage
 
 RETRY_WINDOW = 3600  # keep re-checking an account for an hour if WG stats lag behind last_battle_time
 MIN_REFRESH_GAP = 60
+ACTIVE_WINDOW = 2 * 3600  # played within this window -> fast polling lane
 
 
 @dataclass
@@ -36,15 +37,47 @@ def diff_states(old: dict[tuple[int, str], Stat], new: dict[tuple[int, str], Sta
     return deltas, changed
 
 
+def split_divisions(deltas: list[tuple[tuple[int, str], Stat, float | None]],
+                    ) -> list[tuple[tuple[int, str], Stat, float | None, tuple[int, int, int] | None]]:
+    """Drop pvp_solo/div2/div3 deltas from the list and attach them to the matching random delta as
+    (solo, div2, div3). Left unknown (None) unless the three add up exactly to the random delta, which
+    also covers snapshots taken before division data was stored."""
+    split: dict[int, list[int]] = {}
+    out = []
+    for (ship_id, mode), delta, career in deltas:
+        if mode in DIV_MODES:
+            split.setdefault(ship_id, [0, 0, 0])[DIV_MODES.index(mode)] = delta.battles
+    for (ship_id, mode), delta, career in deltas:
+        if mode in DIV_MODES:
+            continue
+        div = split.get(ship_id)
+        ok = mode == "pvp" and div is not None and sum(div) == delta.battles
+        out.append(((ship_id, mode), delta, career, tuple(div) if ok else None))
+    return out
+
+
 class Tracker:
     def __init__(self, api: WowsApi, storage: Storage, *, track_days: int = 14, max_tracked: int = 200,
-                 record_days: int = 30, clock=time.time):
+                 record_days: int = 30, poll_minutes: int = 10, fast_minutes: int = 0, clock=time.time):
         self.api = api
         self.storage = storage
         self.track_days = track_days
         self.max_tracked = max_tracked
         self.record_days = record_days
+        self.poll_minutes = poll_minutes
+        self.fast_minutes = fast_minutes if 0 < fast_minutes < poll_minutes else 0
         self.clock = clock
+        self._last_full: int | None = None
+
+    @property
+    def tick_minutes(self) -> int:
+        """Scheduler interval: the fast lane when enabled, otherwise the normal poll interval."""
+        return self.fast_minutes or self.poll_minutes
+
+    def interval_text(self) -> str:
+        if self.fast_minutes:
+            return f"已绑定或正在游戏的账号每约 {self.fast_minutes} 分钟检查一次，其余每约 {self.poll_minutes} 分钟"
+        return f"每约 {self.poll_minutes} 分钟检查一次"
 
     def now(self) -> int:
         return int(self.clock())
@@ -80,8 +113,8 @@ class Tracker:
             return RefreshResult(baseline_created=True)
         deltas, changed = diff_states(self.storage.ship_states(account_id), new)
         prev_at = tracked.last_polled_at or tracked.baseline_at or now
-        records = [Record(account_id, now, prev_at, ship_id, mode, delta, career)
-                   for (ship_id, mode), delta, career in deltas]
+        records = [Record(account_id, now, prev_at, ship_id, mode, delta, career, div)
+                   for (ship_id, mode), delta, career, div in split_divisions(deltas)]
         self.storage.save_snapshot(account_id, changed, records)
         marker = last_battle_time
         if marker is not None and not records and now - marker < RETRY_WINDOW:
@@ -106,6 +139,14 @@ class Tracker:
             return 0
         self.prune()
         tracked = self.storage.all_tracked()
+        now = self.now()
+        tick = self.tick_minutes * 60
+        if self._last_full is None or now - self._last_full + tick / 2 >= self.poll_minutes * 60:
+            self._last_full = now  # full tick: every tracked account
+        else:  # fast tick: bound accounts, accounts without a baseline yet, and accounts that played recently
+            bound = self.storage.bound_ids()
+            tracked = [t for t in tracked if t.account_id in bound or t.baseline_at is None
+                       or now - t.last_battle_time < ACTIVE_WINDOW]
         if not tracked:
             return 0
         infos = await self.api.account_info([t.account_id for t in tracked], full=False)

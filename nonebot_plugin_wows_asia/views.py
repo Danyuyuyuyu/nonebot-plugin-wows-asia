@@ -91,6 +91,7 @@ class BattleRow:
     tier: str
     stat: Stat
     career_avg_damage: float | None
+    team: str = ""  # 单野 / 双排 / 三排, or "单野2 双排1" for merged rows; "" = unknown or ranked
 
 
 @dataclass
@@ -114,6 +115,17 @@ class RecentView:
     hidden_rows: int
     generated_at: int
     notes: list[str] = field(default_factory=list)
+    teams: tuple[int, int, int] | None = None  # random battles in 7 days by team size (known rows only)
+
+
+TEAM_CN = ("单野", "双排", "三排")
+
+
+def team_label(division: tuple[int, int, int] | None) -> str:
+    parts = [(name, n) for name, n in zip(TEAM_CN, division or ()) if n]
+    if sum(n for _, n in parts) == 1:
+        return parts[0][0]  # a single battle: just "单野" / "双排" / "三排"
+    return " ".join(f"{name}{n}" for name, n in parts)
 
 
 def ship_label(info: ShipInfo | None, ship_id: int) -> tuple[str, str, str]:
@@ -218,12 +230,15 @@ def build_recent(who: Identity, career: Stat, records: list[Record], infos: dict
                 continue
             name, tname, tier = ship_label(infos.get(r.ship_id), r.ship_id)
             rows.append(BattleRow(fmt_time(r.captured_at), fmt_time(r.prev_at) if r.stat.battles > 1 and day_of(r.prev_at) == day_of(r.captured_at) else "",
-                                  MODE_CN.get(r.mode, r.mode), name, tname, tier, r.stat, r.career_avg_damage))
+                                  MODE_CN.get(r.mode, r.mode), name, tname, tier, r.stat, r.career_avg_damage,
+                                  team_label(r.division)))
             shown += 1
         groups.append(DayGroup(label, sum((r.stat for r in recs), Stat()), rows))
     start = max(start7, base_day)
+    known = [r.division for r in in7 if r.division]
+    teams = tuple(sum(d[i] for d in known) for i in range(3)) if known else None
     return RecentView(who, start.strftime("%Y-%m-%d"), today.strftime("%m-%d"), summary, prev_battles,
-                      fmt_time(baseline_at, "%m-%d %H:%M"), career, days, groups, hidden, now)
+                      fmt_time(baseline_at, "%m-%d %H:%M"), career, days, groups, hidden, now, teams=teams)
 
 
 # ---- state cards ----
@@ -233,10 +248,10 @@ def state_hidden(who: Identity, title: str) -> StateView:
                      "如果是你自己的账号：在游戏设置中关闭“隐藏战绩”，稍后再查询即可。")
 
 
-def state_tracking(who: Identity, baseline_at: int, poll_minutes: int) -> StateView:
+def state_tracking(who: Identity, baseline_at: int, interval: str) -> StateView:
     return StateView("tracking", "最近战绩", who, f"开始记录 · {fmt_time(baseline_at, '%Y-%m-%d %H:%M')}",
                      "还没有足够的近期数据",
-                     f"已保存第一份战绩快照。之后每约 {poll_minutes} 分钟检查一次，有新战斗就会记下每一场的数据。",
+                     f"已保存第一份战绩快照。之后{interval}，有新战斗就会记下每一场的数据。",
                      "现在可以先用 /wows 查看总战绩；打几场之后再查最近战绩就能看到场次明细。")
 
 

@@ -15,6 +15,9 @@ class Config(BaseModel):
     wows_browser_path: str = ""
     # Snapshot tracking for recent stats / per-battle rows.
     wows_poll_minutes: int = Field(default=10, ge=3, le=720)
+    # Bound accounts and accounts that played recently are checked more often, so that two polls
+    # rarely straddle more than one battle (fewer "N 场合计" rows). 0 disables the fast lane.
+    wows_fast_poll_minutes: int = Field(default=3, ge=0, le=60)
     wows_track_days: int = Field(default=14, ge=1, le=90)
     wows_max_tracked: int = Field(default=200, ge=1, le=5000)
     wows_record_days: int = Field(default=30, ge=15, le=365)

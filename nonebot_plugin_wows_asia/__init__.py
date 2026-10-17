@@ -63,7 +63,8 @@ config = get_plugin_config(Config)
 api = WowsApi(config.wows_application_id.get_secret_value(), timeout=config.wows_timeout_seconds)
 storage = Storage(localstore.get_plugin_data_file("wows_asia.sqlite3"))
 tracker = Tracker(api, storage, track_days=config.wows_track_days, max_tracked=config.wows_max_tracked,
-                  record_days=config.wows_record_days)
+                  record_days=config.wows_record_days, poll_minutes=config.wows_poll_minutes,
+                  fast_minutes=config.wows_fast_poll_minutes)
 renderer = CardRenderer(config.wows_browser_path, config.wows_render_scale) \
     if config.wows_render_mode == "image" else None
 app = WowsApp(api, storage, renderer, tracker=tracker, cache_seconds=config.wows_cache_seconds,
@@ -98,7 +99,7 @@ async def poll_job() -> None:
 
 
 if api.configured:
-    scheduler.add_job(poll_job, "interval", minutes=config.wows_poll_minutes, id="wows_asia_snapshot_poll",
+    scheduler.add_job(poll_job, "interval", minutes=tracker.tick_minutes, id="wows_asia_snapshot_poll",
                       max_instances=1, coalesce=True, misfire_grace_time=120, replace_existing=True)
 
 driver = get_driver()

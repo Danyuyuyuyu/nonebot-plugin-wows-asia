@@ -44,7 +44,7 @@ def recent_text(v: RecentView) -> str:
         for r in g.rows:
             st = r.stat
             res = f"{st.wins}胜{st.losses}负" if st.battles > 1 else ("胜" if st.wins else ("负" if st.losses else "平"))
-            lines.append(f"{r.time} {res} {r.ship}（{r.mode}）伤害 {st.damage / st.battles:,.0f} 击沉 {st.frags}")
+            lines.append(f"{r.time} {res} {r.ship}（{r.mode}{'·' + r.team if r.team else ''}）伤害 {st.damage / st.battles:,.0f} 击沉 {st.frags}")
     return "\n".join(lines)
 
 

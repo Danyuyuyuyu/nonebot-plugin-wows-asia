@@ -29,8 +29,10 @@ ACCOUNT_FIELDS = ",".join(
 )
 ACCOUNT_EXTRA = "statistics.rank_solo,statistics.pvp_solo,statistics.pvp_div2,statistics.pvp_div3"
 LIGHT_FIELDS = "account_id,nickname,hidden_profile,last_battle_time"
-SHIP_FIELDS = ",".join(("ship_id",) + tuple(f"{m}.{f}" for m in ("pvp", "rank_solo") for f in _STAT))
-SHIP_EXTRA = "rank_solo"
+SHIP_FIELDS = ",".join(("ship_id",) + tuple(f"{m}.{f}" for m in ("pvp", "rank_solo") for f in _STAT)
+                       + tuple(f"{m}.battles" for m in ("pvp_solo", "pvp_div2", "pvp_div3")))
+# pvp_solo/div2/div3 only carry battle counts: diffing them tells solo vs. division for each random battle.
+SHIP_EXTRA = "rank_solo,pvp_solo,pvp_div2,pvp_div3"
 
 
 class ApiRejected(WowsError):

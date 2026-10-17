@@ -74,12 +74,14 @@ def parse_stat(block: Any) -> Stat | None:
 
 
 MODES = ("pvp", "rank_solo")
+# Random-battle split by team size; stored as extra ship_state modes (battles only), never as records.
+DIV_MODES = ("pvp_solo", "pvp_div2", "pvp_div3")
 
 
 def ship_states(ships: list[dict]) -> dict[tuple[int, str], Stat]:
     out = {}
     for ship in ships:
-        for mode in MODES:
+        for mode in MODES + DIV_MODES:
             stat = parse_stat(ship.get(mode))
             if stat is not None and stat.battles > 0:
                 out[(ship["ship_id"], mode)] = stat

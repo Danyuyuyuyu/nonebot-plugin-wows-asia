@@ -169,7 +169,7 @@ class WowsApp:
         start7 = views.day_of(now).toordinal() - 6
         if not any(views.day_of(r.captured_at).toordinal() >= start7 for r in records):
             if result.baseline_created or now - baseline < 86400:
-                return self._state(views.state_tracking(who, baseline, self.poll_minutes))
+                return self._state(views.state_tracking(who, baseline, self.tracker.interval_text()))
             return self._state(views.state_idle(who, baseline))
         infos = await self.api.ships_info(list({r.ship_id for r in records}))
         view = views.build_recent(who, views.career_random(account), records, infos, baseline, now)

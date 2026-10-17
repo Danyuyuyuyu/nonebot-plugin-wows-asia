@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS ship_state (account_id INTEGER NOT NULL, ship_id INTE
     {", ".join(f"{c} INTEGER NOT NULL" for c in STAT_FIELDS)}, PRIMARY KEY (account_id, ship_id, mode));
 CREATE TABLE IF NOT EXISTS battle_record (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL,
     captured_at INTEGER NOT NULL, prev_at INTEGER NOT NULL, ship_id INTEGER NOT NULL, mode TEXT NOT NULL,
-    {", ".join(f"{c} INTEGER NOT NULL" for c in STAT_FIELDS)}, career_avg_damage REAL);
+    {", ".join(f"{c} INTEGER NOT NULL" for c in STAT_FIELDS)}, career_avg_damage REAL,
+    solo INTEGER, div2 INTEGER, div3 INTEGER);
 CREATE INDEX IF NOT EXISTS idx_record_account_time ON battle_record (account_id, captured_at);
 """
 
@@ -43,6 +44,7 @@ class Record:
     mode: str
     stat: Stat
     career_avg_damage: float | None
+    division: tuple[int, int, int] | None = None  # random only: (solo, div2, div3) battles; None = unknown
 
 
 class Storage:
@@ -53,6 +55,10 @@ class Storage:
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)
+            cols = {row[1] for row in self._db.execute("PRAGMA table_info(battle_record)")}
+            for col in ("solo", "div2", "div3"):  # databases created before 0.2.6
+                if col not in cols:
+                    self._db.execute(f"ALTER TABLE battle_record ADD COLUMN {col} INTEGER")
             self._db.commit()
 
     def close(self) -> None:
@@ -131,17 +137,18 @@ class Storage:
                                  f"VALUES (?,?,?,{_Q})", (account_id, ship_id, mode, *stat.as_tuple()))
             for rec in records:
                 self._db.execute(f"INSERT INTO battle_record (account_id, captured_at, prev_at, ship_id, mode, "
-                                 f"{_COLS}, career_avg_damage) VALUES (?,?,?,?,?,{_Q},?)",
+                                 f"{_COLS}, career_avg_damage, solo, div2, div3) VALUES (?,?,?,?,?,{_Q},?,?,?,?)",
                                  (rec.account_id, rec.captured_at, rec.prev_at, rec.ship_id, rec.mode,
-                                  *rec.stat.as_tuple(), rec.career_avg_damage))
+                                  *rec.stat.as_tuple(), rec.career_avg_damage, *(rec.division or (None,) * 3)))
             self._db.commit()
 
     def records(self, account_id: int, since: int) -> list[Record]:
-        rows = self._all(f"SELECT account_id, captured_at, prev_at, ship_id, mode, {_COLS}, career_avg_damage "
+        rows = self._all(f"SELECT account_id, captured_at, prev_at, ship_id, mode, {_COLS}, career_avg_damage, solo, div2, div3 "
                          "FROM battle_record WHERE account_id=? AND captured_at>=? ORDER BY captured_at DESC, id DESC",
                          (account_id, since))
         n = len(STAT_FIELDS)
-        return [Record(r[0], r[1], r[2], r[3], r[4], Stat(*r[5:5 + n]), r[5 + n]) for r in rows]
+        return [Record(r[0], r[1], r[2], r[3], r[4], Stat(*r[5:5 + n]), r[5 + n],
+                       None if r[6 + n] is None else tuple(r[6 + n:9 + n])) for r in rows]
 
     def prune_records(self, before: int) -> None:
         self._run("DELETE FROM battle_record WHERE captured_at<?", (before,))

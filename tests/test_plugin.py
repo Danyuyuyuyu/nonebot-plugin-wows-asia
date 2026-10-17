@@ -11,7 +11,7 @@ from nonebot_plugin_wows_asia.commands import Command, Query, WowsError, parse_c
 from nonebot_plugin_wows_asia.renderer import CardRenderer
 from nonebot_plugin_wows_asia.stats import Stat, ship_states
 from nonebot_plugin_wows_asia.storage import Storage
-from nonebot_plugin_wows_asia.tracker import Tracker, diff_states
+from nonebot_plugin_wows_asia.tracker import Tracker, diff_states, split_divisions
 
 from .fakes import AID, Clock, FakeWG, make_api
 
@@ -197,7 +197,8 @@ def make_env(**app_kw):
     clock = Clock()
     api = make_api(fake)
     storage = Storage(":memory:")
-    tracker = Tracker(api, storage, clock=clock, max_tracked=app_kw.pop("max_tracked", 200))
+    tracker = Tracker(api, storage, clock=clock, max_tracked=app_kw.pop("max_tracked", 200),
+                      poll_minutes=app_kw.pop("poll_minutes", 10), fast_minutes=app_kw.pop("fast_minutes", 0))
     app = WowsApp(api, storage, app_kw.pop("renderer", None), tracker=tracker, cache_seconds=0, clock=clock,
                   **app_kw)
     return fake, clock, storage, tracker, app
@@ -287,7 +288,7 @@ async def test_bind_recent_flow():
     clock.t += 600
     fake.play(1, dmg=150000, fr=3)
     out = await app.handle(USER, "最近")
-    assert "【最近战绩" in out and "胜 大和" in out and "伤害 150,000" in out
+    assert "【最近战绩" in out and "胜 大和（随机·单野）" in out and "伤害 150,000" in out
     assert "Example_Player" in await app.handle(USER, "我")
     assert await app.handle(USER, "解绑") == "已解除绑定。"
     assert await app.handle(USER, "解绑") == "你还没有绑定账号。"
@@ -404,3 +405,87 @@ async def test_header_clan_colour_and_no_clan():
     await app.handle(USER, "Example_Player")
     html = app.renderer.html[-1]
     assert 'class="clan"' not in html and "无军团 · " in html
+
+
+# ---------------- solo / division split ----------------
+def test_split_divisions():
+    deltas = [((1, "pvp"), S(battles=1), 1.0), ((1, "pvp_div2"), S(battles=1), None),
+              ((2, "pvp"), S(battles=3), 2.0), ((2, "pvp_solo"), S(battles=2), None), ((2, "pvp_div3"), S(battles=1), None),
+              ((3, "pvp"), S(battles=1), None), ((3, "pvp_solo"), S(battles=250), None),  # pre-upgrade snapshot
+              ((4, "rank_solo"), S(battles=1), None), ((5, "pvp"), S(battles=1), None)]  # extra rejected
+    out = {k: div for k, _, _, div in split_divisions(deltas)}
+    assert out == {(1, "pvp"): (0, 1, 0), (2, "pvp"): (2, 0, 1), (3, "pvp"): None,
+                   (4, "rank_solo"): None, (5, "pvp"): None}
+    assert views.team_label((0, 1, 0)) == "双排" and views.team_label((2, 0, 1)) == "单野2 三排1"
+    assert views.team_label((3, 0, 0)) == "单野3" and views.team_label(None) == ""
+
+
+async def test_tracker_records_division_and_card():
+    fake, clock, storage, tracker, app = make_env()
+    assert "已绑定" in await app.handle(USER, "绑定 Example_Player")
+    clock.t += 600
+    fake.play(2, team="pvp_div2")
+    fake.play(1, team="pvp_div3")
+    fake.play(1, team="pvp_solo", w=0, l=1)
+    fake.play(3, mode="rank_solo")
+    assert await tracker.poll_all() == 3
+    by = {(r.ship_id, r.mode): r.division for r in storage.records(AID, 0)}
+    assert by == {(2, "pvp"): (0, 1, 0), (1, "pvp"): (1, 0, 1), (3, "rank_solo"): None}
+    out = await app.handle(USER, "最近")
+    assert "得梅因（随机·双排）" in out and "大和（随机·单野1 三排1）" in out
+    recs = storage.records(AID, 0)
+    view = views.build_recent(views.Identity("Example_Player", AID), Stat(), recs, {}, clock.t - 900, clock.t)
+    assert view.teams == (1, 1, 1)
+    html = cards.recent_html(view)
+    assert "随机 · 双排" in html and "随机中 单野 1 / 双排 1 / 三排 1" in html
+
+
+def test_storage_migrates_old_records(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite3"
+    db = sqlite3.connect(path)
+    cols = ", ".join(f"{c} INTEGER NOT NULL" for c in ("battles", "wins", "losses", "damage", "frags", "xp",
+                                                        "survived", "hits", "shots"))
+    db.execute(f"CREATE TABLE battle_record (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, "
+               f"captured_at INTEGER NOT NULL, prev_at INTEGER NOT NULL, ship_id INTEGER NOT NULL, mode TEXT NOT NULL, "
+               f"{cols}, career_avg_damage REAL)")
+    db.execute("INSERT INTO battle_record VALUES (NULL, 1, 100, 50, 7, 'pvp', 1, 1, 0, 9, 1, 9, 1, 0, 0, NULL)")
+    db.commit()
+    db.close()
+    storage = Storage(path)
+    [rec] = storage.records(1, 0)
+    assert rec.division is None and rec.stat.damage == 9
+    storage.close()
+
+
+async def test_fast_lane_polling():
+    fake, clock, storage, tracker, app = make_env(poll_minutes=10, fast_minutes=3)
+    assert tracker.tick_minutes == 3 and "3 分钟" in tracker.interval_text()
+    tracker.touch(AID, "Example_Player")
+    tracker.touch(42, "Ghost")  # no baseline yet -> stays in the fast lane
+    await tracker.poll_all()  # first tick is a full tick and creates AID's baseline
+
+    def polled_ids():
+        n = len(fake.calls)
+
+        async def run():
+            await tracker.poll_all()
+            ids = [p["account_id"] for path, p in fake.calls[n:] if path == "account/info/"]
+            return set(ids[0].split(",")) if ids else set()
+        return run()
+
+    storage.mark_polled(AID, clock.t, 1, False)  # AID: unbound, last battle long ago -> slow lane only
+    clock.t += 180
+    assert await polled_ids() == {"42"}
+    storage.bind(USER, AID, "Example_Player", clock.t)  # bound -> fast lane
+    clock.t += 180
+    assert await polled_ids() == {"42", str(AID)}
+    storage.unbind(USER)
+    clock.t += 180  # 9 min (+ half a tick) since the last full tick -> full tick, everyone polled
+    assert await polled_ids() == {"42", str(AID)}
+    clock.t += 180
+    assert await polled_ids() == {"42"}
+    storage.mark_polled(AID, clock.t, clock.t - 600, False)  # played recently -> fast lane
+    clock.t += 180
+    assert await polled_ids() == {"42", str(AID)}
+    assert Tracker(tracker.api, storage, poll_minutes=5, fast_minutes=5).tick_minutes == 5  # fast >= poll: off

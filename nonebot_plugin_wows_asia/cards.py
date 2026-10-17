@@ -78,7 +78,7 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .tm{font-size:15px;font-weight:700}.tm small{display:block;font-size:11px;color:#86788A;font-weight:400}
 .res{font-size:14px;font-weight:800;color:#fff;border-radius:8px;text-align:center;padding:5px 0}
 .res.m{font-size:11px}
-.mtag{font-size:11px;color:#86788A;border:1px solid #F1E2E9;border-radius:5px;padding:0 5px;margin-left:6px;font-weight:400}
+.mtag{white-space:nowrap;font-size:11px;color:#86788A;border:1px solid #F1E2E9;border-radius:5px;padding:0 5px;margin-left:6px;font-weight:400}
 .num{text-align:right;font-size:16px;font-weight:800}.num small{display:block;font-size:11px;color:#86788A;font-weight:400}
 .dbar{position:relative;height:10px;background:#F4EEF2;border-radius:5px}.dbar span{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
 .dbar i{position:absolute;left:50%;top:-4px;bottom:-4px;width:2px;background:#3B2F3A;opacity:.35}
@@ -362,12 +362,12 @@ def _battle_row(r) -> str:
         alive = f'<span style="color:{WIN}">存活</span>' if s.survived else f'<span style="color:{BAD}">沉没</span>'
     tcolor = TYPE_COLOR.get(r.ship_type, TYPE_COLOR["其他"])
     chip = f'<span class="tchip" style="background:{tcolor}">{e(r.ship_type)}</span>' if r.ship_type != "其他" else ""
-    extra = f" · {s.battles} 场合计" if merged else ""
+    extra = f" · {s.battles} 场合计" if merged and not r.team else ""  # team counts already add up to N
     tsub = f"<small>{e(r.time_end)}–</small>" if merged and r.time_end else ""
     frags = f"{s.frags / s.battles:.1f}" if merged else f"{s.frags}"
     return f'''<div class="bt{' merged' if merged else ''}"><div class="tm">{tsub}{e(r.time)}</div>
 <div class="res{' m' if merged else ''}" style="background:{col}">{res}</div>
-<div class="sn">{e(r.ship)}<small>{chip}{e(r.tier)} 级<span class="mtag">{e(r.mode)}{extra}</span></small></div>
+<div class="sn">{e(r.ship)}<small>{chip}{e(r.tier)} 级<span class="mtag">{e(r.mode)}{" · " + e(r.team) if r.team else ""}{extra}</span></small></div>
 <div>{bar}<div class="dtx"><b>{dmg:,.0f}</b>{"场均 · " if merged else ""}{cmp}</div></div>
 <div class="num">{frags}<small>{"场均击沉" if merged else "击沉"}</small></div><div class="num">{s.xp / s.battles:,.0f}<small>{"场均经验" if merged else "经验"}</small></div><div class="num" style="font-size:14px">{alive}</div></div>'''
 
@@ -392,7 +392,10 @@ def recent_html(v: RecentView) -> str:
     body += kpi("场均经验", n0(s.per("xp")), *_delta(s.per("xp"), c.per("xp"), "rel"))
     body += kpi("主炮命中率", pct(s.hit_rate), *_delta(s.hit_rate, c.hit_rate, "pp"), meter=s.hit_rate)
     body += "</div></div>"
-    body += '<div class="sec"><h2>近 7 天每日战况</h2><span>随机 + 排位</span></div>' + _daily(v.days)
+    split = ""
+    if v.teams:
+        split = " · 随机中 " + " / ".join(f"{n} {c}" for n, c in zip(("单野", "双排", "三排"), v.teams) if c)
+    body += f'<div class="sec"><h2>近 7 天每日战况</h2><span>随机 + 排位{split}</span></div>' + _daily(v.days)
     body += '<div class="sec"><h2>最近两天场次</h2><span>时间倒序 · 伤害条中线为本船生涯场均</span></div>'
     body += '<div class="panel" style="padding:8px 20px 12px">'
     if v.groups:
