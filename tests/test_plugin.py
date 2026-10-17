@@ -1,5 +1,7 @@
+import asyncio
 import os
 import shutil
+from dataclasses import replace
 
 import httpx
 import pytest
@@ -616,3 +618,63 @@ def test_storage_migrates_old_ship_state(tmp_path):
     assert storage.ship_states(1)[(7, "pvp")].damage == 900
     assert storage.ship_meta(1) == {(7, "pvp"): (False, None)} and storage.stale_accounts() == {1}
     storage.close()
+
+
+async def test_refresh_serialised_per_account():
+    fake, clock, storage, tracker, _ = make_env()
+    tracker.touch(AID, "Example_Player")
+    await tracker.refresh(AID, last_battle_time=fake.account["last_battle_time"])
+    clock.t += 600
+    fake.play(1, dmg=120000)
+    real, gate, calls = tracker.api.ship_stats, asyncio.Event(), []
+
+    async def slow(account_id):
+        calls.append(account_id)
+        await gate.wait()
+        return await real(account_id)
+
+    tracker.api.ship_stats = slow
+    lbt = fake.account["last_battle_time"]
+    poll = asyncio.create_task(tracker.refresh(AID, last_battle_time=lbt, force=True))
+    await asyncio.sleep(0)
+    user = asyncio.create_task(tracker.refresh(AID, last_battle_time=lbt))
+    await asyncio.sleep(0)
+    assert calls == [AID]  # the user query waits instead of diffing the same snapshot
+    gate.set()
+    first, second = await asyncio.gather(poll, user)
+    assert first.new_records == 1 and second.skipped and calls == [AID]
+    assert len(storage.records(AID, 0)) == 1 and not tracker._locks
+
+
+async def test_stale_response_never_rolls_snapshot_back():
+    fake, clock, storage, tracker, _ = make_env()
+    tracker.touch(AID, "Example_Player")
+    await tracker.refresh(AID, last_battle_time=fake.account["last_battle_time"])
+    stale = await tracker.api.ship_stats(AID)
+    clock.t += 600
+    fake.play(1, dmg=120000)
+    assert (await tracker.refresh(AID, last_battle_time=fake.account["last_battle_time"])).new_records == 1
+    battles = storage.ship_states(AID)[(1, "pvp")].battles
+    real = tracker.api.ship_stats
+
+    async def cached(account_id):
+        return stale
+
+    tracker.api.ship_stats = cached
+    clock.t += 600
+    assert (await tracker.refresh(AID, force=True)).new_records == 0
+    assert storage.ship_states(AID)[(1, "pvp")].battles == battles  # stale data ignored
+    tracker.api.ship_stats = real
+    clock.t += 600
+    assert (await tracker.refresh(AID, force=True)).new_records == 0
+    assert len(storage.records(AID, 0)) == 1
+
+
+def test_same_battle_window_stored_once():
+    storage = Storage(":memory:")
+    rec = Record(AID, 100, 50, 1, "pvp", Stat(battles=1, wins=1, damage=90000), 80000.0, end_battles=101)
+    assert storage.save_snapshot(AID, {}, [rec]) == 1
+    assert storage.save_snapshot(AID, {}, [replace(rec, captured_at=200)]) == 0
+    legacy = replace(rec, end_battles=None)  # rows from before 0.2.8 carry no window key
+    assert storage.save_snapshot(AID, {}, [legacy, legacy]) == 2
+    assert [r.end_battles for r in storage.records(AID, 0)] == [None, None, 101]

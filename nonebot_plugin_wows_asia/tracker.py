@@ -1,5 +1,7 @@
 """Snapshot polling: per-ship totals are diffed between polls to recover individual battles."""
+import asyncio
 import time
+import weakref
 from dataclasses import dataclass
 
 from .api import WowsApi
@@ -75,6 +77,8 @@ class Tracker:
         self.fast_minutes = fast_minutes if 0 < fast_minutes < poll_minutes else 0
         self.clock = clock
         self._last_full: int | None = None
+        # one refresh per account at a time; entries vanish once no task holds or waits for the lock
+        self._locks = weakref.WeakValueDictionary()  # account_id -> asyncio.Lock
 
     @property
     def tick_minutes(self) -> int:
@@ -99,6 +103,21 @@ class Tracker:
 
     async def refresh(self, account_id: int, *, last_battle_time: int | None = None,
                       force: bool = False) -> RefreshResult:
+        """Diff the account's ship stats against its snapshot. Serialised per account: a user query racing the
+        scheduler waits for the running refresh and then skips, instead of diffing the same battles twice."""
+        lock = self._locks.get(account_id)
+        if lock is None:
+            lock = self._locks[account_id] = asyncio.Lock()
+        before = self.storage.tracked(account_id)
+        waited = lock.locked()
+        async with lock:
+            if waited and before is not None:
+                tracked = self.storage.tracked(account_id)
+                if tracked is not None and tracked.last_polled_at != before.last_polled_at:
+                    return RefreshResult(skipped=True)  # refreshed by someone else while we waited
+            return await self._refresh(account_id, last_battle_time, force)
+
+    async def _refresh(self, account_id: int, last_battle_time: int | None, force: bool) -> RefreshResult:
         tracked = self.storage.tracked(account_id)
         if tracked is None:
             return RefreshResult(skipped=True)
@@ -122,19 +141,26 @@ class Tracker:
         deltas, changed = diff_states(old, new)
         # rows saved before 0.2.7 have no detail fields: rewrite them now so the next battle is complete
         changed.update({k: v for k, v in new.items() if k in meta and not meta[k][0]})
+        # never move a snapshot backwards: a stale/cached WG response would otherwise roll it back and the same
+        # battles would be counted again on the next poll
+        behind = {k for k, v in changed.items() if k in old and v.battles < old[k].battles}
+        for k in behind:
+            del changed[k]
         prev_at = tracked.last_polled_at or tracked.baseline_at or now
         records = []
         for (ship_id, mode), delta, career, div in split_divisions(deltas):
             full, old_best = meta.get((ship_id, mode), (True, None))
             records.append(Record(account_id, now, prev_at, ship_id, mode, delta, career, div,
-                                  full=full, best=best_flags(old_best, bests.get((ship_id, mode)))))
-        self.storage.save_snapshot(account_id, changed, records, bests)
-        self.storage.mark_full(account_id)
+                                  full=full, best=best_flags(old_best, bests.get((ship_id, mode))),
+                                  end_battles=new[(ship_id, mode)].battles))
+        saved = self.storage.save_snapshot(account_id, changed, records, bests)
+        if not behind:  # rows skipped above keep their old data; leave them flagged for a rewrite
+            self.storage.mark_full(account_id)
         marker = last_battle_time
-        if marker is not None and not records and now - marker < RETRY_WINDOW:
+        if marker is not None and not saved and now - marker < RETRY_WINDOW:
             marker = None  # WG may not have published ship stats yet: retry next poll
         self.storage.mark_polled(account_id, now, marker, False)
-        return RefreshResult(new_records=len(records))
+        return RefreshResult(new_records=saved)
 
     def prune(self) -> list[int]:
         now = self.now()

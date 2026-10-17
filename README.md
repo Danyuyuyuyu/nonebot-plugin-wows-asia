@@ -62,6 +62,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 - 同一艘船在两次快照之间打了多场时只能合并成一行显示（灰底，数值为场均）。显示的时间是快照时间，可能比实际结束晚几分钟。
 - 随机战斗会标注**单野 / 双排 / 三排**（对比每船 `pvp_solo` / `pvp_div2` / `pvp_div3` 场数的差值得到）；合并行显示各自场数，如“单野1 双排1”。升级到 0.2.6 之前记录的场次没有这项信息。
 - 记录随机（pvp）和单人排位（rank_solo）；行动、剧情等模式不计入。
+- 防重复计数：同一账号的刷新串行执行（用户查询碰上定时检查会等它完成，不会重复请求）；WG 偶尔返回的旧数据（场数比已存快照少）会被忽略，快照不会回退；每条记录带该船结束时的累计场数并建唯一索引，同一段场数只会写入一次。
 - 绑定账号会一直记录；未绑定账号在 `WOWS_TRACK_DAYS` 天内没人查询就停止记录；逐场记录保留 `WOWS_RECORD_DAYS` 天。
 
 ## 给 AI 插件调用（nonebot-plugin-aigf-master 等）
@@ -79,7 +80,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 # 从 GitHub 安装
 pip install "git+https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia.git"
 # 或安装发布的 wheel
-pip install nonebot_plugin_wows_asia-0.2.7-py3-none-any.whl
+pip install nonebot_plugin_wows_asia-0.2.8-py3-none-any.whl
 
 # 安装截图用的 Chromium（Linux 服务器可加 --with-deps 自动装系统依赖）
 playwright install chromium

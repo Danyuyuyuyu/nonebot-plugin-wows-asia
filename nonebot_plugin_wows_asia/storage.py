@@ -13,6 +13,7 @@ _STATDEF = ", ".join(f"{c} INTEGER NOT NULL DEFAULT 0" for c in STAT_FIELDS)
 # Columns added after the first release: (table, column, definition). Applied with ALTER TABLE on old databases.
 _LATER = [("battle_record", "solo", "INTEGER"), ("battle_record", "div2", "INTEGER"), ("battle_record", "div3", "INTEGER"),
           ("battle_record", "full", "INTEGER NOT NULL DEFAULT 0"), ("battle_record", "best", "INTEGER NOT NULL DEFAULT 0"),
+          ("battle_record", "end_battles", "INTEGER"),
           ("ship_state", "full", "INTEGER NOT NULL DEFAULT 0"), ("ship_state", "best_damage", "INTEGER"),
           ("ship_state", "best_frags", "INTEGER"), ("ship_state", "best_xp", "INTEGER")]
 BEST_DAMAGE, BEST_FRAGS, BEST_XP = 1, 2, 4
@@ -54,6 +55,7 @@ class Record:
     division: tuple[int, int, int] | None = None  # random only: (solo, div2, div3) battles; None = unknown
     full: bool = True  # detail fields (scouting, potential...) valid; False for pre-0.2.7 snapshots
     best: int = 0  # BEST_* bitmask: this window raised the ship's personal best
+    end_battles: int | None = None  # ship's cumulative battle count after this window (dedupe key)
 
 
 class Storage:
@@ -69,6 +71,10 @@ class Storage:
                 cols = {row[1] for row in self._db.execute(f"PRAGMA table_info({table})")}
                 if col not in cols:
                     self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
+            # one record per battle window: a window ending at the same cumulative count can never be stored twice
+            # (rows from before 0.2.8 have NULL here, which UNIQUE allows any number of times)
+            self._db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_record_window "
+                             "ON battle_record (account_id, ship_id, mode, end_battles)")
             self._db.commit()
 
     def close(self) -> None:
@@ -154,8 +160,11 @@ class Storage:
         self._run("UPDATE ship_state SET full=1 WHERE account_id=? AND full=0", (account_id,))
 
     def save_snapshot(self, account_id: int, states: dict[tuple[int, str], Stat], records: list[Record],
-                      bests: dict[tuple[int, str], tuple[int, int, int]] | None = None) -> None:
+                      bests: dict[tuple[int, str], tuple[int, int, int]] | None = None) -> int:
+        """Store snapshots and records in one transaction. Returns how many records were new
+        (a window already stored - same ship, mode and end_battles - is ignored)."""
         bests = bests or {}
+        inserted = 0
         with self._lock:
             for (ship_id, mode), stat in states.items():
                 best = bests.get((ship_id, mode)) or (None, None, None)
@@ -163,21 +172,23 @@ class Storage:
                                  f"best_damage, best_frags, best_xp) VALUES (?,?,?,{_Q},1,?,?,?)",
                                  (account_id, ship_id, mode, *stat.as_tuple(), *best))
             for rec in records:
-                self._db.execute(f"INSERT INTO battle_record (account_id, captured_at, prev_at, ship_id, mode, "
-                                 f"{_COLS}, career_avg_damage, solo, div2, div3, full, best) "
-                                 f"VALUES (?,?,?,?,?,{_Q},?,?,?,?,?,?)",
-                                 (rec.account_id, rec.captured_at, rec.prev_at, rec.ship_id, rec.mode,
-                                  *rec.stat.as_tuple(), rec.career_avg_damage, *(rec.division or (None,) * 3),
-                                  int(rec.full), rec.best))
+                cur = self._db.execute(f"INSERT OR IGNORE INTO battle_record (account_id, captured_at, prev_at, "
+                                       f"ship_id, mode, {_COLS}, career_avg_damage, solo, div2, div3, full, best, "
+                                       f"end_battles) VALUES (?,?,?,?,?,{_Q},?,?,?,?,?,?,?)",
+                                       (rec.account_id, rec.captured_at, rec.prev_at, rec.ship_id, rec.mode,
+                                        *rec.stat.as_tuple(), rec.career_avg_damage,
+                                        *(rec.division or (None,) * 3), int(rec.full), rec.best, rec.end_battles))
+                inserted += cur.rowcount
             self._db.commit()
+        return inserted
 
     def records(self, account_id: int, since: int) -> list[Record]:
         rows = self._all(f"SELECT account_id, captured_at, prev_at, ship_id, mode, {_COLS}, career_avg_damage, "
-                         "solo, div2, div3, full, best FROM battle_record WHERE account_id=? AND captured_at>=? "
+                         "solo, div2, div3, full, best, end_battles FROM battle_record WHERE account_id=? AND captured_at>=? "
                          "ORDER BY captured_at DESC, id DESC", (account_id, since))
         n = len(STAT_FIELDS)
         return [Record(r[0], r[1], r[2], r[3], r[4], Stat(*r[5:5 + n]), r[5 + n],
-                       None if r[6 + n] is None else tuple(r[6 + n:9 + n]), bool(r[9 + n]), r[10 + n] or 0)
+                       None if r[6 + n] is None else tuple(r[6 + n:9 + n]), bool(r[9 + n]), r[10 + n] or 0, r[11 + n])
                 for r in rows]
 
     def prune_records(self, before: int) -> None:
