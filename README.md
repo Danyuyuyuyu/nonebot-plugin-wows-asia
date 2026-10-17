@@ -30,10 +30,11 @@ NoneBot2 战舰世界（WoWS）**亚服**战绩查询插件：图片战绩卡、
 | 战舰 | `船=大和`（按名字包含匹配，只在打过的船里找） |
 | 模式 | `随机` `排位` `单野` `组队` `双排` `三排` |
 | 结果 | `胜` `负` |
-| 排序 | `按伤害` `按击沉` `按经验` `按侦察` `按潜在`（也可写 `伤害最高`），不写按时间倒序 |
+| 排序 | `按伤害` `按击沉` `按经验` `按侦察` `按潜在`（也可写 `伤害最高`）为从高到低；`伤害最低` `击沉最少` `最低经验` 等为从低到高；不写按时间倒序。数值相同时再按伤害比 |
+| 好坏 | `最好` `最差`（按经验从高到低 / 从低到高；可带数量：`最好5把` `最差的3把`）。经验综合了伤害、击沉、占点、点亮等，不同舰种之间也能比 |
 | 数量 | `前5` |
 
-例：`/wows 单场 今天 按伤害`、`/wows 场次 昨天 船=大和`、`/wows 场次 @张三 近3天 排位`。
+例：`/wows 单场 今天 按伤害`、`/wows 场次 昨天 船=大和`、`/wows 场次 @张三 近3天 排位`、`/wows 场次 近3天 最差5把`、`/wows 单场 今天 伤害最低`。
 
 别名 `/窝窝战绩`；指令前缀以 NoneBot 的 `COMMAND_START` 为准。昵称精确匹配失败时最多返回 5 个候选，不会擅自使用第一个候选。
 
@@ -80,7 +81,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 # 从 GitHub 安装
 pip install "git+https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia.git"
 # 或安装发布的 wheel
-pip install nonebot_plugin_wows_asia-0.2.8-py3-none-any.whl
+pip install nonebot_plugin_wows_asia-0.2.9-py3-none-any.whl
 
 # 安装截图用的 Chromium（Linux 服务器可加 --with-deps 自动装系统依赖）
 playwright install chromium

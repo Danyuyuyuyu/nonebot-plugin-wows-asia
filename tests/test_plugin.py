@@ -507,12 +507,19 @@ from nonebot_plugin_wows_asia.storage import BEST_DAMAGE, Record  # noqa: E402
     ("场次 id 7 组队 胜", "battles", Query("id", "7"), Filter(mode="pvp", team="div", result="win")),
     ("场次 10-12~10-15 双排 按经验", "battles", None, Filter(period=("date", (10, 12), (10, 15)), mode="pvp", team="div2", sort="xp")),
     ("场次 船：得梅因 10月15日", "battles", None, Filter(period=("date", (10, 15), (10, 15)), ship="得梅因")),
+    ("单场 今天 伤害最低", "battle", None, Filter(period=("ago", 0, 0), sort="damage", asc=True)),
+    ("场次 最少击沉 前3", "battles", None, Filter(sort="frags", asc=True, limit=3)),
+    ("场次 近3天 最差5把", "battles", None, Filter(period=("ago", 2, 0), sort="xp", asc=True, limit=5)),
+    ("场次 打得最好的", "battles", None, Filter(sort="xp")),
+    ("场次 最好 按经验", "battles", None, Filter(sort="xp")),
+    ("单场 最差 第2把", "battle", None, Filter(sort="xp", asc=True, index=2)),
 ])
 def test_parse_battle_filters(raw, action, target, flt):
     assert parse_command(raw) == Command(action, target, flt)
 
 
-@pytest.mark.parametrize("raw", ["场次 a b", "场次 今天 昨天", "场次 排位 单野", "场次 13-40", "单场 0", "场次 近200天"])
+@pytest.mark.parametrize("raw", ["场次 a b", "场次 今天 昨天", "场次 排位 单野", "场次 13-40", "单场 0", "场次 近200天",
+                                 "场次 伤害最高 伤害最低", "场次 按伤害 最差", "场次 最好 最差"])
 def test_parse_battle_filter_errors(raw):
     with pytest.raises(WowsError):
         parse_command(raw)
@@ -541,6 +548,11 @@ def test_filter_records():
     assert pick(sort="damage").records[0].stat.damage == 200000  # merged row ranks by its per-battle average
     assert pick(ship="岛风").empty_reason == "记录里没有名字含“岛风”的船"
     assert pick(sort="scouting").records and not any(not r.full for r in pick(sort="scouting").records)
+    low = pick(sort="damage", asc=True)
+    assert [r.stat.damage for r in low.records][:2] == [50000, 90000] and low.desc.endswith("按伤害从低到高")
+    # equal values (all 0 kills here) fall back to damage in the same direction
+    assert [r.stat.damage for r in pick(period=("ago", 0, 0), sort="frags", asc=True).records] == [150000, 200000]
+    assert [r.stat.damage for r in pick(period=("ago", 0, 0), sort="frags").records] == [200000, 150000]
     # explicit dates resolve to the most recent past occurrence
     assert len(pick(period=("date", (10, 15), (10, 16))).records) == 5
     assert views.filter_records(recs, Filter(), infos, now, default_days=7).desc == "近 7 天"

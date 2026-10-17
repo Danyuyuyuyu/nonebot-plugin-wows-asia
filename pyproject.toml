@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nonebot-plugin-wows-asia"
-version = "0.2.8"
+version = "0.2.9"
 description = "NoneBot2 WoWS 亚服战绩查询：总战绩卡、最近战绩卡（逐场记录）、账号绑定"
 readme = "README.md"
 license = "MIT"

@@ -365,10 +365,12 @@ def filter_records(records: list[Record], flt, infos: dict[int, ShipInfo], now: 
         parts.append("胜场" if flt.result == "win" else "负场")
     if flt.sort:
         attr = SORT_ATTR[flt.sort]
-        out = sorted(out, key=lambda r: (getattr(r.stat, attr) / r.stat.battles, r.captured_at), reverse=True)
+        # ties (e.g. many 0-kill games) fall back to damage in the same direction, then time
+        out = sorted(out, key=lambda r: (getattr(r.stat, attr) / r.stat.battles, r.stat.damage / r.stat.battles,
+                                         r.captured_at), reverse=not flt.asc)
         if flt.sort in ("scouting", "potential"):
             out = [r for r in out if r.full]  # pre-0.2.7 records have no such data
-        parts.append(f"按{SORT_CN[flt.sort]}排序")
+        parts.append(f"按{SORT_CN[flt.sort]}{'从低到高' if flt.asc else '排序'}")
     reason = ""
     if not out:
         if not records:
@@ -405,6 +407,7 @@ class BattlesView:
     tracking_since: str
     generated_at: int
     teams: tuple[int, int, int] | None = None
+    ascending: bool = False  # sorted lowest first
 
 
 def build_battles(who: Identity, picked: Picked, flt, career: Stat, ship_states: dict, baseline_at: int,
@@ -434,7 +437,7 @@ def build_battles(who: Identity, picked: Picked, flt, career: Stat, ship_states:
     teams = tuple(sum(d[i] for d in known) for i in range(3)) if known else None
     return BattlesView(who, picked.desc, summary, base, base_label, shown_rows, groups,
                        SORT_CN.get(flt.sort or "", ""), max(len(recs) - limit, 0),
-                       fmt_time(baseline_at, "%m-%d %H:%M"), now, teams)
+                       fmt_time(baseline_at, "%m-%d %H:%M"), now, teams, bool(flt.sort and flt.asc))
 
 
 @dataclass

@@ -13,8 +13,9 @@ HELP = """WoWS 亚服战绩查询
 　谁：我（默认）/ 昵称 / id 账号ID / @某人
 　筛选（顺序随意）：今天 昨天 前天 近3天 10-15 10-12~10-15
 　　船=大和　随机 排位 单野 组队 双排 三排　胜 负
-　　按伤害 按击沉 按经验 按侦察 按潜在　前5
-　例：/wows 单场 今天 按伤害　/wows 场次 昨天 船=大和
+　　按伤害 按击沉 按经验 按侦察 按潜在（伤害最低 = 从低到高）
+　　最好 最差（按经验）　前5
+　例：/wows 单场 今天 按伤害　/wows 场次 昨天 船=大和　/wows 场次 最差5把
 /wows 解绑　　　　取消绑定
 别名：/窝窝战绩
 最近战绩依靠定时记录战绩快照得出：绑定或首次查询后开始记录，之前的场次查不到。
@@ -48,6 +49,7 @@ class Filter:
     team: str | None = None  # solo | div | div2 | div3 (random only)
     result: str | None = None  # win | loss
     sort: str | None = None  # damage | frags | xp | scouting | potential; None = newest first
+    asc: bool = False  # sort lowest first (伤害最低 / 最差)
     limit: int | None = None
     index: int | None = None  # 单场 N: the N-th entry of the (sorted) list
 
@@ -60,7 +62,8 @@ class Command:
 
 
 FILTER_USAGE = ("筛选写法：今天 / 昨天 / 前天 / 近3天 / 10-15 / 10-12~10-15，船=船名，随机 / 排位 / 单野 / 组队 / 双排 / 三排，"
-                "胜 / 负，按伤害 / 按击沉 / 按经验 / 按侦察 / 按潜在，前N。例：/wows 场次 昨天 船=大和")
+                "胜 / 负，按伤害 / 按击沉 / 按经验 / 按侦察 / 按潜在（伤害最低 等为从低到高），最好 / 最差（按经验），前N。"
+                "例：/wows 场次 昨天 船=大和")
 _DAY_WORDS = {"今天": 0, "今日": 0, "昨天": 1, "昨日": 1, "前天": 2}
 _WEEK_WORDS = {"本周", "这周", "一周", "近一周", "最近一周", "这一周"}
 _MODE_WORDS = {"随机": ("pvp", None), "随机战": ("pvp", None), "随机战斗": ("pvp", None),
@@ -74,11 +77,18 @@ _SORT_WORDS = {"伤害": "damage", "击沉": "frags", "经验": "xp", "侦察": 
 _DATE = r"(\d{1,2})[-/.月](\d{1,2})日?"
 
 
-def _sort_word(token: str) -> str | None:
-    for pattern in (r"按(.+)", r"(.+?)(?:最高|最多)", r"(?:最高|最多)(.+)"):
+_HIGH, _LOW = "(?:最高|最多)", "(?:最低|最少)"
+# 最好 / 最差 rank by XP: it rewards damage, kills, caps and spotting alike, so it compares across ship types
+_BEST = re.compile(r"(?:打得?)?最(好|差|烂)(?:的)?(?:(\d{1,2})(?:场|把|局)?)?")
+
+
+def _sort_word(token: str) -> tuple[str, bool] | None:
+    """按伤害 / 伤害最高 / 最高伤害 -> (sort, False); 伤害最低 / 最少击沉 -> (sort, True)."""
+    for pattern, asc in ((r"按(.+)", False), (rf"(.+?){_HIGH}", False), (rf"{_HIGH}(.+)", False),
+                         (rf"(.+?){_LOW}", True), (rf"{_LOW}(.+)", True)):
         m = re.fullmatch(pattern, token)
         if m and m.group(1) in _SORT_WORDS:
-            return _SORT_WORDS[m.group(1)]
+            return _SORT_WORDS[m.group(1)], asc
     return None
 
 
@@ -100,7 +110,7 @@ def _parse_filter(parts: list[str], allow_index: bool) -> tuple[Filter, Query | 
 
     def put(key: str, value) -> None:
         if f.get(key) not in (None, value):
-            raise WowsError("筛选条件互相冲突，请只写一个时间 / 模式 / 排序。" + FILTER_USAGE)
+            raise WowsError("筛选条件互相冲突，请只写一个时间 / 模式 / 排序（最高和最低也只能选一个）。" + FILTER_USAGE)
         f[key] = value
 
     i = 0
@@ -141,7 +151,13 @@ def _parse_filter(parts: list[str], allow_index: bool) -> tuple[Filter, Query | 
         elif tok in _RESULT_WORDS:
             put("result", _RESULT_WORDS[tok])
         elif sort := _sort_word(tok):
-            put("sort", sort)
+            put("sort", sort[0])
+            put("asc", sort[1])
+        elif m := _BEST.fullmatch(tok):
+            put("sort", "xp")
+            put("asc", m.group(1) != "好")
+            if m.group(2):
+                put("limit", int(m.group(2)))
         elif tok in ("按时间", "最新", "最近"):
             continue
         elif m := re.fullmatch(r"(?:前|最多)?(\d{1,2})(?:场|把|局)|前(\d{1,2})", tok):

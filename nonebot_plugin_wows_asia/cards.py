@@ -467,7 +467,7 @@ def battles_html(v: BattlesView) -> str:
     split = ""
     if v.teams:
         split = " · 随机中 " + " / ".join(f"{n} {k}" for n, k in zip(("单野", "双排", "三排"), v.teams) if k)
-    order = f"按{v.sorted_by}从高到低" if v.sorted_by else "时间倒序"
+    order = f"按{v.sorted_by}{'从低到高' if v.ascending else '从高到低'}" if v.sorted_by else "时间倒序"
     body += f'<div class="sec"><h2>场次明细</h2><span>{e(order)} · 对比基准：{e(v.base_label)}{split}</span></div>'
     body += '<div class="panel" style="padding:8px 20px 12px">' + _list_rows(v)
     more = f"共 {v.hidden_rows + len(v.rows)} 场符合条件，只列出前 {len(v.rows)} 场。" if v.hidden_rows else ""
