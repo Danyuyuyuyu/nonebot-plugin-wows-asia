@@ -5,8 +5,8 @@ from typing import Any
 
 from .api import ShipInfo
 from .commands import HOURS_CN
-from .ship_match import match_ships
-from .stats import Stat, num, parse_stat
+from .ship_match import match_ships, normalize
+from .stats import Stat, num, parse_best, parse_stat
 from .storage import Record
 from .ship_names import SHIP_NAMES
 
@@ -46,7 +46,7 @@ class Identity:
 
 @dataclass
 class StateView:
-    kind: str  # hidden | tracking | idle | newbie | quota
+    kind: str  # hidden | tracking | idle | newbie | quota | noship
     card_title: str
     who: Identity
     sub: str
@@ -522,3 +522,123 @@ def state_nomatch(who: Identity, title: str, desc: str, reason: str, baseline_at
     return StateView("idle", title, who, desc, reason,
                      f"只能查到 {fmt_time(baseline_at, '%m-%d %H:%M')} 开始记录之后的场次，条件：{desc}。",
                      "可以换个时间或去掉部分条件再试，例如：/wows 场次 近7天")
+
+
+# ---- 单船 ----
+@dataclass
+class ShipView:
+    who: Identity
+    ship_id: int
+    name: str
+    ship_type: str  # 战列舰 ...; 其他 = unknown
+    tier: str  # roman numeral
+    mode: str  # pvp | rank_solo: the mode shown in the main section
+    stat: Stat
+    career: Stat  # the player's whole random career (KPI deltas)
+    ranked: Stat | None  # shown next to random when mode is pvp
+    random: Stat | None  # shown next to ranked when mode is rank_solo
+    peers: Stat | None  # the player's other ships of the same tier and type, same mode
+    peer_label: str  # e.g. "同级战列舰"; "" = no peers
+    bests: tuple[int, int, int] | None  # best damage / frags / xp in this mode
+    divisions: list[tuple[str, int, int]]  # (单野 / 双排 / 三排, battles, wins) of random battles
+    usage: tuple[int, int] | None  # (rank by battles in this mode among the player's ships, ships played)
+    history: list[tuple[str, float, bool]]  # recorded battles: (MM-DD, damage per battle, is_latest) oldest -> newest
+    generated_at: int
+    query: str = ""
+    corrected: bool = False  # the query was a typo / homophone
+    also: list[str] = field(default_factory=list)  # other ships the query matched
+    peer_count: int = 0
+
+
+def ship_names(ships: list[dict], infos: dict[int, ShipInfo]) -> dict[int, list[str]]:
+    """Client name first (what players type), then the API name, for every ship in ships/stats."""
+    out = {}
+    for ship in ships:
+        sid = ship["ship_id"]
+        out[sid] = [ship_label(infos.get(sid), sid)[0]] + ([infos[sid].name] if sid in infos else [])
+    return out
+
+
+def played_ships(ships: list[dict] | None) -> list[dict]:
+    out = []
+    for ship in ships or []:
+        if any((s := parse_stat(ship.get(m))) and s.battles for m in ("pvp", "rank_solo")):
+            out.append(ship)
+    return out
+
+
+def _mode_stat(ship: dict, mode: str) -> Stat | None:
+    s = parse_stat(ship.get(mode))
+    return s if s and s.battles else None
+
+
+def pick_ship(query: str, ships: list[dict], infos: dict[int, ShipInfo]):
+    """-> (chosen ship dict or None, ShipMatch, other matched names). Several hits: an exact name wins,
+    otherwise the most played one (the others are listed on the card)."""
+    names = ship_names(ships, infos)
+    found = match_ships(query, names)
+    if not found.ids:
+        return None, found, []
+    key = normalize(query)
+    hits = [s for s in ships if s["ship_id"] in found.ids]
+
+    def played(s):
+        return sum((_mode_stat(s, m) or Stat()).battles for m in ("pvp", "rank_solo"))
+
+    exact = [s for s in hits if any(normalize(n) == key for n in names[s["ship_id"]])]
+    chosen = max(exact or hits, key=played)
+    also = [names[s["ship_id"]][0] for s in sorted(hits, key=played, reverse=True) if s is not chosen]
+    return chosen, found, also
+
+
+def build_ship(who: Identity, account: dict, ships: list[dict], chosen: dict, infos: dict[int, ShipInfo],
+               records: list[Record], now: int, *, mode: str | None = None, query: str = "",
+               corrected: bool = False, also: list[str] | None = None, history_size: int = 10) -> ShipView:
+    sid = chosen["ship_id"]
+    name, tname, tier = ship_label(infos.get(sid), sid)
+    rnd, rk = _mode_stat(chosen, "pvp"), _mode_stat(chosen, "rank_solo")
+    if mode is None or (mode == "pvp" and not rnd) or (mode == "rank_solo" and not rk):
+        mode = "pvp" if rnd else "rank_solo"
+    stat = (rnd if mode == "pvp" else rk) or Stat()
+    info = infos.get(sid)
+    peers, count = Stat(), 0
+    if info and tname != "其他":
+        for ship in ships:
+            other = infos.get(ship["ship_id"])
+            s = _mode_stat(ship, mode)
+            if ship is not chosen and s and other and other.tier == info.tier and other.type == info.type:
+                peers, count = peers + s, count + 1
+    played = sorted(((_mode_stat(s, mode) or Stat()).battles, s["ship_id"]) for s in ships)
+    played = [p for p in played if p[0]]
+    usage = None
+    if stat.battles and played:
+        usage = (1 + sum(1 for b, _ in played if b > stat.battles), len(played))
+    divisions = []  # always random battles, also shown on the ranked view
+    for key, label in (("pvp_solo", "单野"), ("pvp_div2", "双排"), ("pvp_div3", "三排")):
+        block = chosen.get(key) if isinstance(chosen.get(key), dict) else None
+        b = num(block.get("battles")) if block else None
+        w = num(block.get("wins")) if block else None
+        if b and w is not None:
+            divisions.append((label, b, w))
+    recs = sorted((r for r in records if r.ship_id == sid and r.mode == mode), key=lambda r: r.captured_at)
+    recs = recs[-history_size:]
+    history = [(fmt_time(r.captured_at, "%m-%d"), r.stat.damage / r.stat.battles, r is recs[-1]) for r in recs]
+    return ShipView(who, sid, name, tname, tier, mode, stat, career_random(account),
+                    rk if mode == "pvp" else None, rnd if mode == "rank_solo" else None,
+                    peers if count else None, f"同级{tname}" if count else "",
+                    parse_best(chosen.get(mode)), divisions, usage, history, now,
+                    clean(query, 24), corrected, list(also or [])[:3], count)
+
+
+def state_noship(who: Identity, query: str, suggestions: list[str], ships: list[dict],
+                 infos: dict[int, ShipInfo]) -> StateView:
+    q = clean(query, 24)
+    if suggestions:
+        tip = "是不是想查：" + " / ".join(clean(n, 24) for n in suggestions) + "？"
+    else:
+        top = sorted(ships, key=lambda s: -((_mode_stat(s, "pvp") or Stat()).battles))[:5]
+        names = [ship_label(infos.get(s["ship_id"]), s["ship_id"])[0] for s in top]
+        tip = ("TA 开得最多的：" + " / ".join(names) + "。") if names else "TA 还没有随机或排位战斗记录。"
+    return StateView("noship", "单船战绩", who, f"查找 · {q}", f"没开过“{q}”",
+                     f"在 TA 打过随机或排位的船里，没有找到名字像“{q}”的船（船名支持错字、同音字，但需是 TA 开过的船）。",
+                     tip)

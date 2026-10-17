@@ -54,7 +54,9 @@ class WowsApp:
             account_id, reply = await self._target(user_key, cmd, mentions or [])
             if reply is not None:
                 return reply
-            if cmd.action in ("battles", "battle"):
+            if cmd.action == "ship":
+                card = await self.ship_card(account_id, cmd.filter)
+            elif cmd.action in ("battles", "battle"):
                 card = await self.battles_card(account_id, cmd.filter, single=cmd.action == "battle")
             elif cmd.action == "recent":
                 card = await self.recent_card(account_id)
@@ -167,6 +169,26 @@ class WowsApp:
         infos = await self.api.ships_info(views.total_ship_ids(account, ships))
         view = views.build_total(who, account, ships, infos, self.now())
         return Card(cards.total_html(view), formatting.total_text(view), formatting.total_caption(view))
+
+    async def ship_card(self, account_id: int, flt) -> Card:
+        """Career numbers of one ship, straight from ships/stats (works without any local records)."""
+        account = await self._account(account_id)
+        who = await self._identity(account_id, account)
+        if account.get("hidden_profile") is True:
+            return self._state(views.state_hidden(who, "单船战绩"))
+        ships = await self.api.ship_stats(account_id)
+        if ships is None:
+            return self._state(views.state_hidden(who, "单船战绩"))
+        ships = views.played_ships(ships)
+        infos = await self.api.ships_info([s["ship_id"] for s in ships])
+        chosen, found, also = views.pick_ship(flt.ship, ships, infos)
+        if chosen is None:
+            return self._state(views.state_noship(who, flt.ship, found.suggestions, ships, infos))
+        now = self.now()
+        records = self.storage.records(account_id, now - self.tracker.record_days * 86400)
+        view = views.build_ship(who, account, ships, chosen, infos, records, now, mode=flt.mode, query=flt.ship,
+                                corrected=found.corrected, also=also)
+        return Card(cards.ship_html(view), formatting.ship_text(view), formatting.ship_caption(view))
 
     async def recent_card(self, account_id: int) -> Card:
         account = await self._account(account_id)

@@ -34,8 +34,9 @@ _SHIP_DETAIL = ("damage_scouting", "art_agro", "torpedo_agro", "ships_spotted", 
                 "second_battery.hits", "second_battery.shots", "second_battery.frags",
                 "max_damage_dealt", "max_frags_battle", "max_xp")
 SHIP_FIELDS = ",".join(("ship_id",) + tuple(f"{m}.{f}" for m in ("pvp", "rank_solo") for f in _STAT + _SHIP_DETAIL)
-                       + tuple(f"{m}.battles" for m in ("pvp_solo", "pvp_div2", "pvp_div3")))
-# pvp_solo/div2/div3 only carry battle counts: diffing them tells solo vs. division for each random battle.
+                       + tuple(f"{m}.{f}" for m in ("pvp_solo", "pvp_div2", "pvp_div3") for f in ("battles", "wins")))
+# pvp_solo/div2/div3: battle counts are diffed to tell solo vs. division for each random battle (the tracker
+# keeps battles only); wins feed the 单船 card's team breakdown.
 SHIP_EXTRA = "rank_solo,pvp_solo,pvp_div2,pvp_div3"
 
 

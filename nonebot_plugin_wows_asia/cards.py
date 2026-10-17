@@ -6,7 +6,7 @@ from html import escape
 
 from .stats import Stat
 from .storage import BEST_DAMAGE, BEST_FRAGS, BEST_XP
-from .views import CST, BattleDetailView, BattlesView, Identity, RecentView, StateView, TotalView
+from .views import CST, MODE_CN, BattleDetailView, BattlesView, Identity, RecentView, ShipView, StateView, TotalView
 
 PINK, PINK_D, PINK_S = "#E0628C", "#B4426C", "#FFE3EC"
 LAV, LAV_S = "#8C7BD8", "#ECE8FB"
@@ -201,7 +201,7 @@ def kpi(label: str, value: str, delta: str = "", cls: str = "", meter: float | N
     return f'<div class="kpi">{icon(label)}<div class="l">{e(label)}</div><div class="v">{e(value)}</div>{d}{m}</div>'
 
 
-def _delta(cur: float | None, base: float | None, kind: str) -> tuple[str, str]:
+def _delta(cur: float | None, base: float | None, kind: str, word: str = "生涯") -> tuple[str, str]:
     """kind: rel (relative %), abs2 (absolute 2dp), pp (percentage points)."""
     if cur is None or base is None:
         return "", ""
@@ -217,8 +217,8 @@ def _delta(cur: float | None, base: float | None, kind: str) -> tuple[str, str]:
         d = cur - base
         txt = f"{abs(d):.1f}%"
     if abs(d) < 0.05:
-        return "与生涯持平", ""
-    return (f"高于生涯 +{txt}", "up") if d > 0 else (f"低于生涯 −{txt}", "down")
+        return f"与{word}持平", ""
+    return (f"高于{word} +{txt}", "up") if d > 0 else (f"低于{word} −{txt}", "down")
 
 
 # ---------------- total ----------------
@@ -427,6 +427,7 @@ ICONS = {
     "tracking": ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6E5BC4" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>', LAV_S, "正在记录中，过一会儿再来～"),
     "idle": ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6E5BC4" stroke-width="1.8" stroke-linecap="round"><path d="M4 16c3 0 3-2 6-2s3 2 6 2 3-2 4-2"/><path d="M4 20c3 0 3-2 6-2s3 2 6 2 3-2 4-2"/><path d="M12 4v7M9 7h6"/></svg>', LAV_S, "港口休息中～"),
     "quota": ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#B4426C" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M8 12h8"/></svg>', PINK_S, "名额暂时满啦"),
+    "noship": ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6E5BC4" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>', LAV_S, "换个船名试试～"),
     "newbie": ('<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#2F8566" stroke-width="1.8" stroke-linecap="round"><path d="M12 20v-8"/><path d="M12 12c0-4 3-6 7-6 0 4-3 6-7 6z"/><path d="M12 14c0-3-2-5-6-5 0 3 2 5 6 5z"/></svg>', "#E6F3EC", "新舰长你好呀"),
 }
 
@@ -503,18 +504,22 @@ def _rate(hits: int, shots: int) -> float | None:
 
 
 def _history(v: BattleDetailView) -> str:
-    if len(v.history) < 2:
+    return _bars(v.history, v.ship_career.per("damage") if v.ship_career else None)
+
+
+def _bars(history: list[tuple[str, float, bool]], avg: float | None) -> str:
+    """Per-battle damage bars (pink = highlighted battle) with a dashed line at the ship's career average."""
+    if len(history) < 2:
         return '<div class="panel"><div class="empty">本船记录到的场次还太少</div></div>'
     W, H, top = 796, 150, 18
-    mx = max(d for _, d, _ in v.history) or 1
-    avg = v.ship_career.per("damage") if v.ship_career else None
+    mx = max(d for _, d, _ in history) or 1
     if avg:
         mx = max(mx, avg)
-    n = len(v.history)
+    n = len(history)
     step = W / n
     bw = min(46, step * 0.6)
     g = ""
-    for i, (label, dmg, this) in enumerate(v.history):
+    for i, (label, dmg, this) in enumerate(history):
         hgt = max(dmg / mx * (H - top - 22), 3)
         x = i * step + (step - bw) / 2
         y = H - 22 - hgt
@@ -601,4 +606,100 @@ def battle_html(v: BattleDetailView) -> str:
         notes.append("这场记录于插件 0.2.7 之前，只有基础数据（无侦察、潜在伤害等）。")
     body += f'<div class="note2">{e(" ".join(notes))}</div>'
     body += foot("单场数据基于战绩快照差值计算", v.generated_at) + "</div>"
+    return page(f'<div class="card">{h}{body}</div>')
+
+
+# ---------------- 单船 ----------------
+def ship_html(v: ShipView) -> str:
+    s, mode_cn = v.stat, MODE_CN.get(v.mode, v.mode)
+    wr = s.win_rate
+    if s.battles < 20:
+        bubble = "样本还少哦～"
+    elif wr is not None and wr >= 60:
+        bubble = "这船是本命吧～"
+    elif wr is not None and wr >= 55:
+        bubble = "开得很好呢～"
+    else:
+        bubble = "单船数据整理好啦"
+    type_txt = v.ship_type if v.ship_type != "其他" else "舰种未知"
+    h = header(v.who, "单船战绩", bubble, f"{v.name} · {v.tier} 级{type_txt} · {mode_cn}", f"统计于 {stamp(v.generated_at)[5:]}")
+    tcolor = TYPE_COLOR.get(v.ship_type, TYPE_COLOR["其他"])
+    chip = f'<span class="tchip" style="background:{tcolor}">{e(v.ship_type)}</span>' if v.ship_type != "其他" else ""
+    usage = f"常用第 {v.usage[0]} / 共 {v.usage[1]} 艘" if v.usage else ""
+    fixed = ""
+    if v.corrected:
+        fixed = f'<span class="nb">已把“{e(v.query)}”纠正为“{e(v.name)}”</span>'
+    if v.also:
+        fixed += f'<span class="nb" style="background:{LAV_S};color:#6E5BC4">同时匹配：{e(" / ".join(v.also))}</span>'
+    fixed = f'<div style="margin-top:8px">{fixed}</div>' if fixed else ""
+    body = (f'<div class="body"><div class="panel" style="display:flex;align-items:center;gap:22px;padding:18px 24px">'
+            f'<div style="flex:1;min-width:0"><div style="font-size:30px;font-weight:800;line-height:1.35">{e(v.name)}</div>'
+            f'<div style="font-size:14px;color:{SUB};margin-top:4px">{chip}{e(v.tier)} 级 · {e(mode_cn)}战斗</div>{fixed}</div>'
+            f'<div style="text-align:right"><div style="font-size:26px;font-weight:800">{s.battles:,} 场</div>'
+            f'<div style="font-size:13px;color:{SUB};margin-top:4px">{e(usage)}</div></div></div>')
+    vs = v.mode == "pvp"  # KPI deltas compare with the player's whole random career
+
+    def d(cur, base, kind):
+        return _delta(cur, base, kind, "整体") if vs else ("", "")
+
+    c = v.career
+    span = "小字为与 TA 全部随机战斗场均相比" if vs else "排位数据，不与随机对比"
+    body += (f'<div class="sec"><h2>核心数据<em>{e(mode_cn)}战斗</em></h2><span>{span}</span></div>'
+             '<div class="hero">' + donut(s, "本船胜率") + '<div class="kpis">')
+    share = f"占 TA 随机 {s.battles / c.battles * 100:.1f}%" if vs and c.battles else ""
+    body += kpi("战斗场数", f"{s.battles:,}", share)
+    body += kpi("场均伤害", n0(s.per("damage")), *d(s.per("damage"), c.per("damage"), "rel"))
+    body += kpi("场均击沉", "—" if s.per("frags") is None else f"{s.per('frags'):.2f}", *d(s.per("frags"), c.per("frags"), "abs2"))
+    body += kpi("存活率", pct(s.survival), *d(s.survival, c.survival, "pp"), meter=s.survival)
+    body += kpi("场均经验", n0(s.per("xp")), *d(s.per("xp"), c.per("xp"), "rel"))
+    body += kpi("主炮命中率", pct(s.hit_rate), *d(s.hit_rate, c.hit_rate, "pp"), meter=s.hit_rate)
+    body += "</div></div>"
+    n = s.battles or 1
+    items = [("场均侦察伤害", n0(s.scouting / n)), ("场均潜在伤害", n0(s.potential / n)), ("场均点亮", f"{s.spotted / n:.2f}")]
+    if s.torp_shots:
+        items.append(("鱼雷命中率", pct(s.torp_hits / s.torp_shots * 100)))
+    if s.planes:
+        items.append(("场均击落飞机", f"{s.planes / n:.2f}"))
+    items.append(("场均占点 / 防点", f"{s.cap / n:.1f} / {s.defend / n:.1f}"))
+    body += (f'<div class="strip" style="grid-template-columns:repeat({len(items)},1fr);margin-top:12px">'
+             + "".join(f'<div><div class="l">{e(k)}</div><div class="v">{e(x)}</div></div>' for k, x in items) + "</div>")
+    cols = [("本船", s)]
+    if v.peers:
+        cols.append((v.peer_label, v.peers))
+    other = v.ranked if v.mode == "pvp" else v.random
+    if other:
+        cols.append(("本船" + ("排位" if v.mode == "pvp" else "随机"), other))
+    table = "<table class=\"cmp\"><tr><th></th>" + "".join(f"<th>{e(t)}</th>" for t, _ in cols) + "</tr>"
+    for label, fn in (("场数", lambda x: f"{x.battles:,}"), ("胜率", lambda x: pct(x.win_rate)),
+                      ("场均伤害", lambda x: n0(x.per("damage"))), ("场均击沉", lambda x: f"{x.per('frags'):.2f}"),
+                      ("存活率", lambda x: pct(x.survival)), ("场均经验", lambda x: n0(x.per("xp")))):
+        table += f"<tr><td>{label}</td>" + "".join(f"<td>{fn(x)}</td>" for _, x in cols) + "</tr>"
+    table += "</table>"
+    cmp_note = (f"{v.peer_label}为 TA 其他 {v.tier} 级{v.ship_type}（{v.peer_count} 艘）合计" if v.peers
+                else "TA 没开过其他同等级同舰种的船")
+    div_html = ""
+    for label, b, w in v.divisions:
+        r = w / b * 100
+        div_html += f'''<div style="margin:10px 0 12px"><div style="display:flex;font-size:14px"><b>{label}</b><span style="color:{SUB};margin-left:8px">{b:,} 场</span><span style="margin-left:auto;font-weight:800">{r:.1f}%</span></div>
+<div class="wbar" style="margin-top:7px"><span style="width:{r:.1f}%"></span><div class="m50"></div></div></div>'''
+    if div_html:
+        div_html += f'<div style="font-size:12px;color:{SUB}">0–100% 刻度 · 竖线为 50%</div>'
+    else:
+        div_html = '<div class="empty">暂无本船组队数据</div>'
+    body += f'''<div class="two"><div><div class="sec"><h2>对比</h2><span>{e(cmp_note)}</span></div><div class="panel" style="padding:12px 20px 8px;height:250px">{table}</div></div>
+<div><div class="sec"><h2>组队表现<em>本船随机</em></h2><span>胜率</span></div><div class="panel" style="padding:4px 20px 12px;height:250px">{div_html}</div></div></div>'''
+    if v.bests:
+        body += f'<div class="sec"><h2>单场最高<em>本船{e(mode_cn)}</em></h2><span>本船生涯最佳单场</span></div>'
+        body += '<div class="strip" style="grid-template-columns:repeat(3,1fr)">'
+        for label, value in zip(("单场最高伤害", "单场最高击沉", "单场最高经验"), v.bests):
+            body += f'<div><div class="l">{icon(label, 13, "sico")}{label}</div><div class="v">{value:,}</div></div>'
+        body += "</div>"
+    notes = ["数据为 WG 公开的本船生涯累计，场均 = 累计 ÷ 场数。"]
+    if len(v.history) >= 2:
+        body += (f'<div class="sec"><h2>本船近期伤害</h2><span>记录到的最近 {len(v.history)} 场 · 粉色为最近一场 · 虚线为本船场均</span></div>'
+                 + _bars(v.history, s.per("damage")))
+    else:
+        notes.append("开始记录 TA 的战绩后，这里会多出本船近期每场的伤害走势。")
+    body += f'<div class="note2">{e(" ".join(notes))}</div>'
+    body += foot("单船战绩 · 本船生涯累计", v.generated_at) + "</div>"
     return page(f'<div class="card">{h}{body}</div>')

@@ -15,7 +15,7 @@ from nonebot_plugin_wows_asia.stats import Stat, ship_states
 from nonebot_plugin_wows_asia.storage import Storage
 from nonebot_plugin_wows_asia.tracker import Tracker, diff_states, split_divisions
 
-from .fakes import AID, Clock, FakeWG, make_api
+from .fakes import AID, SHIPS_INFO, Clock, FakeWG, account, make_api, stat
 
 USER = "OneBot V11:10001"
 
@@ -743,7 +743,7 @@ def test_ai_guide_examples_parse():
     line = next(x for x in AI_GUIDE.splitlines() if x.strip().startswith("例："))
     examples = re.findall(r"→(wows [^；。]+)", line)
     assert len(examples) >= 6
-    actions = {"最近": "recent", "场次": "battles", "单场": "battle", "绑定": "bind"}
+    actions = {"最近": "recent", "场次": "battles", "单场": "battle", "绑定": "bind", "单船": "ship", "战舰": "ship"}
     for example in examples:
         args = example.split()[1:]
         cmd = parse_command(" ".join(args))
@@ -756,3 +756,72 @@ def test_no_data_cards_carry_career_summary():
     for st in (views.state_tracking(who, 1792130400, "每 3 分钟检查一次", career), views.state_idle(who, 1792130400, career)):
         assert "生涯随机 1,000 场 · 胜率 55.0% · 场均伤害 80,000" in st.tip and "/wows" not in st.tip
     assert views.state_tracking(who, 1792130400, "x").tip.startswith("打几场")
+
+
+def test_parse_ship_command():
+    cmd = parse_command("单船 大和")
+    assert cmd.action == "ship" and cmd.target is None and cmd.filter.ship == "大和" and cmd.filter.mode is None
+    cmd = parse_command("战舰 伊吹 张三")
+    assert cmd.action == "ship" and cmd.target == Query("name", "张三") and cmd.filter.ship == "伊吹"
+    assert parse_command("单船 我 大和").filter.ship == "大和"
+    assert parse_command("单船 大和 id 2000000001").target == Query("id", "2000000001")
+    cmd = parse_command("单船 大和 排位")
+    assert cmd.filter.mode == "rank_solo" and cmd.target is None
+    cmd = parse_command("张三 船=大和")  # total + ship -> that ship's career
+    assert cmd.action == "ship" and cmd.target == Query("name", "张三") and cmd.filter.ship == "大和"
+    assert parse_command("单船 张三 船=大和").target == Query("name", "张三")
+    assert parse_command("船=大和").action == "ship"
+    for bad in ("单船", "单船 大和 张三 李四", "单船 船=大和 船=伊吹"):
+        with pytest.raises(WowsError):
+            parse_command(bad)
+    assert parse_command("张三").action == "total"
+
+
+async def test_ship_card_career_peers_and_divisions():
+    fake, clock, storage, tracker, app = make_env()
+    card = await app.ship_card(AID, parse_command("单船 岛风").filter)
+    assert "【单船 · 岛风（X 级驱逐舰） · 随机】" in card.text
+    assert "200 场｜胜率 50.00%｜场均伤害 58,900" in card.text
+    assert "同级驱逐舰（1 艘）：胜率 52.0%｜场均伤害 55,200" in card.text  # 哈兰德
+    assert "单场最高：伤害 176,700｜击沉 5" in card.text
+    assert "常用第 3 / 共 4 艘" in card.html and "低于整体 −6.5%" in card.html
+    big = await app.ship_card(AID, parse_command("单船 大和").filter)
+    assert "随机组队：单野 300 场 56.0%　双排 100 场 62.0%" in big.text
+    assert "本船排位：40 场｜胜率 52.5%" in big.text
+    assert "TA 第 1 常用的船" in big.caption and "同级" not in big.caption  # no other X battleship
+    ranked = await app.ship_card(AID, parse_command("单船 大和 排位").filter)
+    assert "· 排位】" in ranked.text and "本船随机：400 场" in ranked.text and "随机组队：单野 300 场" in ranked.text
+
+
+async def test_ship_card_typo_ambiguous_and_missing():
+    fake, clock, storage, tracker, app = make_env()
+    card = await app.ship_card(AID, parse_command("单船 大合").filter)
+    assert "大和（X 级战列舰，由“大合”纠正）" in card.text and "已把“大合”纠正为“大和”" in card.html
+    fake.ships.append({"ship_id": 5, "pvp": stat(10, 5, 5, 500000, 5, 10000, 5)})
+    SHIPS_INFO[5] = {"ship_id": 5, "name": "岛风改", "tier": 10, "type": "Destroyer"}
+    try:
+        app.api._ships.clear()
+        card = await app.ship_card(AID, parse_command("单船 岛风").filter)
+        assert "【单船 · 岛风（X 级驱逐舰）" in card.text and "同时匹配：岛风改" in card.text
+        card = await app.ship_card(AID, parse_command("单船 风").filter)  # no exact name: the most played
+        assert "【单船 · 岛风（" in card.text
+    finally:
+        SHIPS_INFO.pop(5)
+    missing = await app.ship_card(AID, parse_command("单船 蒙大拿").filter)
+    assert "没开过“蒙大拿”" in missing.text and "TA 开得最多的：大和 / 得梅因 / 岛风" in missing.text
+
+
+async def test_ship_card_history_and_hidden():
+    fake, clock, storage, tracker, app = make_env()
+    await app.handle("u1", "绑定 Example_Player")
+    for dmg in (90000, 150000):
+        fake.play(3, dmg=dmg)
+        clock.t += 700
+        await tracker.refresh(AID, last_battle_time=fake.account["last_battle_time"])
+    card = await app.ship_card(AID, parse_command("单船 岛风").filter)
+    assert "记录到的最近 2 场" in card.html and "150k" in card.html
+    reply = await app.handle("u1", "单船 岛风")
+    assert isinstance(reply, str) and "【单船 · 岛风" in reply  # renderer=None -> text
+    fake.account = account(hidden=True)
+    app._cache.clear()
+    assert "隐藏了战绩" in (await app.handle("u1", "单船 岛风"))

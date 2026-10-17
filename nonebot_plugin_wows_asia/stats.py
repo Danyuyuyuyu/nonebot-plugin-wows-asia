@@ -123,5 +123,6 @@ def ship_states(ships: list[dict]) -> dict[tuple[int, str], Stat]:
         for mode in MODES + DIV_MODES:
             stat = parse_stat(ship.get(mode))
             if stat is not None and stat.battles > 0:
-                out[(ship["ship_id"], mode)] = stat
+                # team-size modes keep battle counts only, so stored snapshots stay comparable across versions
+                out[(ship["ship_id"], mode)] = Stat(stat.battles) if mode in DIV_MODES else stat
     return out

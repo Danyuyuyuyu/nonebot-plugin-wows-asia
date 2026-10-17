@@ -42,7 +42,7 @@ def ships():
     return [
         {"ship_id": 1, "pvp": stat(400, 230, 168, 38600000, 380, 620000, 200, 9000, 30000),
          "rank_solo": stat(40, 21, 19, 3800000, 30, 60000, 20),
-         "pvp_solo": {"battles": 300}, "pvp_div2": {"battles": 100}, "pvp_div3": {"battles": 0}},
+         "pvp_solo": {"battles": 300, "wins": 168}, "pvp_div2": {"battles": 100, "wins": 62}, "pvp_div3": {"battles": 0}},
         {"ship_id": 2, "pvp": stat(300, 160, 138, 22400000, 260, 450000, 140, 15000, 45000), "rank_solo": None,
          "pvp_solo": {"battles": 300}, "pvp_div2": None, "pvp_div3": None},
         {"ship_id": 3, "pvp": stat(200, 100, 99, 11780000, 150, 280000, 80),

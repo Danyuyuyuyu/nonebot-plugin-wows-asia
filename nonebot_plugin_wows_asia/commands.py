@@ -10,6 +10,7 @@ HELP = """WoWS 亚服战绩查询
 /wows 最近 [昵称]　最近 7 天汇总 + 最近两天场次
 /wows 场次 [谁] [筛选]　按条件列出记录到的场次
 /wows 单场 [谁] [筛选|序号]　单场详情（默认最近一场）
+/wows 单船 船名 [谁]　某艘船的生涯数据（也可写 战舰）
 　谁：我（默认）/ 昵称 / id 账号ID / @某人
 　筛选（顺序随意）：今天 昨天 前天 近3天 10-15 10-12~10-15
 　　上午 下午 晚上 凌晨（可连写：今天下午）　14点后 14-18点
@@ -17,6 +18,7 @@ HELP = """WoWS 亚服战绩查询
 　　按伤害 按击沉 按经验 按侦察 按潜在（伤害最低 = 从低到高）
 　　最好 最差（按经验）　前5
 　例：/wows 单场 今天 按伤害　/wows 场次 昨天 船=大和　/wows 场次 最差5把
+　　　/wows 单船 大和　/wows 战舰 伊吹 张三
 /wows 解绑　　　　取消绑定
 别名：/窝窝战绩
 最近战绩依靠定时记录战绩快照得出：绑定或首次查询后开始记录，之前的场次查不到。
@@ -28,6 +30,7 @@ UNBIND_WORDS = {"解绑", "unbind"}
 SELF_WORDS = {"我", "me"}
 BATTLES_WORDS = {"场次", "战斗", "battles"}
 BATTLE_WORDS = {"单场", "battle"}
+SHIP_WORDS = {"单船", "战舰", "ship"}
 HELP_WORDS = {"help", "--help", "帮助"}
 
 
@@ -58,9 +61,9 @@ class Filter:
 
 @dataclass(frozen=True)
 class Command:
-    action: str  # help | total | recent | bind | unbind | battles | battle
+    action: str  # help | total | recent | bind | unbind | battles | battle | ship
     target: Query | None = None  # None = the caller's bound account (or the @mentioned user's)
-    filter: Filter | None = None
+    filter: Filter | None = None  # ship: Filter(ship=name, mode=pvp|rank_solo|None)
 
 
 FILTER_USAGE = ("筛选写法：今天 / 昨天 / 前天 / 近3天 / 10-15 / 10-12~10-15，上午 / 下午 / 晚上 / 凌晨 / 14点后 / 14-18点，船=船名，随机 / 排位 / 单野 / 组队 / 双排 / 三排，"
@@ -96,6 +99,37 @@ def _sort_word(token: str) -> tuple[str, bool] | None:
         if m and m.group(1) in _SORT_WORDS:
             return _SORT_WORDS[m.group(1)], asc
     return None
+
+
+_SHIP_EQ = re.compile(r"(?:船|ship|战舰)[=:：](.+)", re.I)
+SHIP_USAGE = "用法：/wows 单船 船名 [谁]，例如：/wows 单船 大和、/wows 单船 伊吹 张三"
+
+
+def _ship_name(raw: str) -> str:
+    name = raw.strip()
+    if not 1 <= len(name) <= 24:
+        raise WowsError("船名请写 1～24 个字，例如：船=大和")
+    return name
+
+
+def _parse_ship(parts: list[str]) -> Command:
+    """单船 大和 [谁] / 单船 [谁] 船=大和 / 张三 船=大和: the first free word is the ship, the rest the player."""
+    ship = mode = None
+    rest: list[str] = []
+    for tok in parts:
+        if m := _SHIP_EQ.fullmatch(tok):
+            if ship is not None:
+                raise WowsError("一次只能查一艘船。" + SHIP_USAGE)
+            ship = _ship_name(m.group(1))
+        elif tok in ("随机", "随机战", "随机战斗", "排位", "排位赛"):
+            mode = _MODE_WORDS[tok][0]
+        elif tok.lower() not in SELF_WORDS:
+            rest.append(tok)
+    if ship is None:
+        if not rest:
+            raise WowsError(SHIP_USAGE)
+        ship = _ship_name(rest.pop(0))
+    return Command("ship", _target(rest) if rest else None, Filter(ship=ship, mode=mode))
 
 
 def _date(m: str, d: str) -> tuple[int, int]:
@@ -158,11 +192,8 @@ def _parse_filter(parts: list[str], allow_index: bool) -> tuple[Filter, Query | 
         elif m := re.fullmatch(_DATE, tok):
             d = _date(m.group(1), m.group(2))
             put("period", ("date", d, d))
-        elif m := re.fullmatch(r"(?:船|ship|战舰)[=:：](.+)", tok, re.I):
-            name = m.group(1).strip()
-            if not 1 <= len(name) <= 24:
-                raise WowsError("船名请写 1～24 个字，例如：船=大和")
-            put("ship", name)
+        elif m := _SHIP_EQ.fullmatch(tok):
+            put("ship", _ship_name(m.group(1)))
         elif tok in _MODE_WORDS:
             mode, team = _MODE_WORDS[tok]
             put("mode", mode)
@@ -246,6 +277,10 @@ def parse_command(raw: str) -> Command:
         single = head in BATTLE_WORDS
         flt, target = _parse_filter(rest, allow_index=single)
         return Command("battle" if single else "battles", target, flt)
+    if head in SHIP_WORDS:
+        return _parse_ship(rest)
+    if any(_SHIP_EQ.fullmatch(p) for p in parts):  # “张三 船=大和” reads as that ship's career
+        return _parse_ship(parts)
     if len(parts) == 1 and head in SELF_WORDS:
         return Command("total")
     return Command("total", _target(parts))

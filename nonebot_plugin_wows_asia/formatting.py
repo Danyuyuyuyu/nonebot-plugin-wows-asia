@@ -1,6 +1,6 @@
 """Plain-text fallbacks (used when image rendering is disabled or fails)."""
 from .cards import n0, pct
-from .views import BattleDetailView, BattleRow, BattlesView, RecentView, StateView, TotalView, roman
+from .views import MODE_CN, BattleDetailView, BattleRow, BattlesView, RecentView, ShipView, StateView, TotalView, roman
 
 
 def candidates_text(candidates: list[dict]) -> str:
@@ -133,4 +133,55 @@ def recent_caption(v: RecentView) -> str:
             f"场均伤害 {n0(s.per('damage'))}，存活率 {pct(s.survival)}")
     for g in v.groups:
         text += f"\n— {g.label}：" + "；".join(battle_line(r) for r in g.rows[:6])
+    return text
+
+
+def _f2(v: float | None) -> str:
+    return "—" if v is None else f"{v:.2f}"
+
+
+def _ship_head(v: ShipView) -> str:
+    kind = v.ship_type if v.ship_type != "其他" else "舰种未知"
+    fixed = f"，由“{v.query}”纠正" if v.corrected else ""
+    return f"{v.name}（{v.tier} 级{kind}{fixed}）"
+
+
+def ship_text(v: ShipView) -> str:
+    s, mode = v.stat, MODE_CN.get(v.mode, v.mode)
+    lines = [_title(v.who), f"【单船 · {_ship_head(v)} · {mode}】",
+             f"{s.battles:,} 场｜胜率 {pct(s.win_rate, 2)}｜场均伤害 {n0(s.per('damage'))}｜场均击沉 {_f2(s.per('frags'))}",
+             f"存活率 {pct(s.survival)}｜场均经验 {n0(s.per('xp'))}｜主炮命中率 {pct(s.hit_rate)}"
+             + (f"｜鱼雷命中率 {pct(s.torp_hits / s.torp_shots * 100)}" if s.torp_shots else "")]
+    n = s.battles or 1
+    lines.append(f"场均侦察 {n0(s.scouting / n)}｜场均潜在 {n0(s.potential / n)}｜场均点亮 {s.spotted / n:.2f}")
+    if v.peers:
+        p = v.peers
+        lines.append(f"{v.peer_label}（{v.peer_count} 艘）：胜率 {pct(p.win_rate)}｜场均伤害 {n0(p.per('damage'))}｜场均击沉 {_f2(p.per('frags'))}")
+    other = v.ranked if v.mode == "pvp" else v.random
+    if other:
+        lines.append(f"本船{'排位' if v.mode == 'pvp' else '随机'}：{other.battles:,} 场｜胜率 {pct(other.win_rate)}"
+                     f"｜场均伤害 {n0(other.per('damage'))}")
+    if v.divisions:
+        lines.append("随机组队：" + "　".join(f"{label} {b:,} 场 {w / b * 100:.1f}%" for label, b, w in v.divisions))
+    if v.bests:
+        lines.append(f"单场最高：伤害 {v.bests[0]:,}｜击沉 {v.bests[1]}｜经验 {v.bests[2]:,}")
+    if v.also:
+        lines.append("同时匹配：" + " / ".join(v.also) + "（可写完整船名）")
+    return "\n".join(lines)
+
+
+def ship_caption(v: ShipView) -> str:
+    s, mode = v.stat, MODE_CN.get(v.mode, v.mode)
+    text = (f"{v.who.nickname} 的 {_ship_head(v)}：{mode} {s.battles:,} 场，胜率 {pct(s.win_rate)}，"
+            f"场均伤害 {n0(s.per('damage'))}，场均击沉 {_f2(s.per('frags'))}，存活率 {pct(s.survival)}")
+    if v.usage:
+        text += f"，TA 第 {v.usage[0]} 常用的船"
+    if v.peers:
+        text += f"；TA 其他{v.peer_label}（{v.peer_count} 艘）胜率 {pct(v.peers.win_rate)}，场均伤害 {n0(v.peers.per('damage'))}"
+    if v.mode == "pvp" and v.career.battles:
+        text += f"；TA 全部随机胜率 {pct(v.career.win_rate)}，场均伤害 {n0(v.career.per('damage'))}"
+    if v.bests:
+        text += f"；单场最高伤害 {v.bests[0]:,}"
+    if v.also:
+        text += "；同时匹配：" + " / ".join(v.also)
     return text
