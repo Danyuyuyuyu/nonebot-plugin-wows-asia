@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .api import ShipInfo
+from .commands import HOURS_CN
+from .ship_match import match_ships
 from .stats import Stat, num, parse_stat
 from .storage import Record
 from .ship_names import SHIP_NAMES
@@ -346,13 +348,27 @@ def filter_records(records: list[Record], flt, infos: dict[int, ShipInfo], now: 
     start, end = _period_days(period, today)
     parts = [period_label(period, today) or f"{start:%m-%d}~{end:%m-%d}"] if period else ["全部记录"]
     out = [r for r in records if start is None or start <= day_of(r.captured_at) <= end]
+    if flt.hours:
+        lo, hi = flt.hours
+        out = [r for r in out if lo <= datetime.fromtimestamp(r.captured_at, CST).hour < hi]
+        word = HOURS_CN.get(tuple(flt.hours))
+        if parts and word:
+            parts[0] += word  # 今天下午
+        else:
+            parts.append(word or f"{lo}–{hi}点")
+    found = None
     if flt.ship:
-        key = flt.ship.casefold()
         names = {sid: ship_label(infos.get(sid), sid)[0] for sid in {r.ship_id for r in records}}
-        ids = {sid for sid, name in names.items() if key in name.casefold()}
+        # match client and API names; typos and homophones are corrected among the ships this player has played
+        found = match_ships(flt.ship, {sid: [name] + ([infos[sid].name] if sid in infos else [])
+                                       for sid, name in names.items()})
+        ids = found.ids
         out = [r for r in out if r.ship_id in ids]
-        matched = sorted({names[r.ship_id] for r in out})
-        parts.append(" / ".join(clean(n, 24) for n in matched[:3]) if matched else clean(flt.ship, 24))
+        matched = sorted({names[r.ship_id] for r in out}) or sorted({names[sid] for sid in ids})
+        label = " / ".join(clean(n, 24) for n in matched[:3]) if matched else clean(flt.ship, 24)
+        if found.corrected:
+            label += f"（由“{clean(flt.ship, 24)}”纠正）"
+        parts.append(label)
     if flt.mode:
         out = [r for r in out if r.mode == flt.mode]
         if not flt.team:
@@ -375,8 +391,13 @@ def filter_records(records: list[Record], flt, infos: dict[int, ShipInfo], now: 
     if not out:
         if not records:
             reason = "还没有记录到任何场次"
-        elif flt.ship and not any(r.ship_id in ids for r in records):
+        elif found is not None and not found.ids:
             reason = f"记录里没有名字含“{clean(flt.ship, 24)}”的船"
+            if found.suggestions:
+                reason += "，是不是想查：" + " / ".join(clean(n, 24) for n in found.suggestions) + "？"
+            else:
+                recent = list(dict.fromkeys(ship_label(infos.get(r.ship_id), r.ship_id)[0] for r in records))
+                reason += "。最近打过：" + " / ".join(recent[:5])
         else:
             reason = "没有符合条件的场次"
     rows = [battle_row(r, infos, with_date=True) for r in out]
@@ -449,12 +470,13 @@ class BattleDetailView:
     ship_career: Stat | None
     history: list[tuple[str, float, bool]]  # (label, per-battle damage, is_this) oldest -> newest
     rank: tuple[int, int] | None  # (rank by damage, out of N) among history
-    position: str  # e.g. "今天 · 按伤害排序第 1 / 共 6 场"
+    position: str  # e.g. "今天 · 伊吹 · 最新一场 · 按时间第 2 / 共 2 场"
     generated_at: int
+    others: int = 0  # other battles matching the same filter (shown with a hint to use 场次)
 
 
 def build_battle(who: Identity, picked: Picked, index: int, all_records: list[Record], ship_states: dict,
-                 now: int, history_size: int = 10) -> BattleDetailView:
+                 now: int, history_size: int = 10, *, by_time: bool = True) -> BattleDetailView:
     rec, row = picked.records[index], picked.rows[index]
     same = [r for r in all_records if r.ship_id == rec.ship_id and r.mode == rec.mode]
     same = sorted(same, key=lambda r: r.captured_at)
@@ -474,8 +496,16 @@ def build_battle(who: Identity, picked: Picked, index: int, all_records: list[Re
         when = f"{fmt_time(rec.captured_at, '%m-%d')} {row.time_end}–{row.time}"
     else:
         when = fmt_time(rec.captured_at, "%m-%d %H:%M")
-    position = f"{picked.desc} · 第 {index + 1} / 共 {len(picked.records)} 场"
-    return BattleDetailView(who, row, rec, when, ship_states.get((rec.ship_id, rec.mode)), history, rank, position, now)
+    total = len(picked.records)
+    if not by_time:
+        place = f"第 {index + 1} / 共 {total} 场"
+    elif total == 1:
+        place = "共 1 场"
+    else:  # list is newest first: spell out both directions so "第 1" is never read as the earliest battle
+        place = f"{'最新一场' if index == 0 else f'倒数第 {index + 1} 场'} · 按时间第 {total - index} / 共 {total} 场"
+    position = f"{picked.desc} · {place}"
+    return BattleDetailView(who, row, rec, when, ship_states.get((rec.ship_id, rec.mode)), history, rank, position, now,
+                            total - 1)
 
 
 def state_nomatch(who: Identity, title: str, desc: str, reason: str, baseline_at: int) -> StateView:

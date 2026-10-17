@@ -222,7 +222,7 @@ class WowsApp:
             if index >= len(picked.records):
                 return self._state(views.state_nomatch(who, title, picked.desc,
                                                        f"只有 {len(picked.records)} 场符合条件", baseline))
-            view = views.build_battle(who, picked, index, records, states, now)
+            view = views.build_battle(who, picked, index, records, states, now, by_time=not flt.sort)
             return Card(cards.battle_html(view), formatting.battle_text(view),
                         formatting.battle_text(view, with_title=False))
         view = views.build_battles(who, picked, flt, views.career_random(account), states, baseline, now)

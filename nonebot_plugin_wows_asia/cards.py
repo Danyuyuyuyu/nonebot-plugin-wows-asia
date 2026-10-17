@@ -126,6 +126,8 @@ def _ink(hex_color: str, factor: float = .78) -> str:
 
 
 def header(who: Identity, title: str, bubble: str, sub: str, stamp_text: str) -> str:
+    # keep each " · " segment on one line so long filter descriptions wrap between segments, not inside words
+    sub_html = " · ".join(f'<span style="white-space:nowrap">{e(p)}</span>' for p in sub.split(" · "))
     color = who.clan_color if re.fullmatch(r"#[0-9A-Fa-f]{6}", who.clan_color or "") else "#B3B3B3"
     clan = f'<span class="clan" style="color:{_ink(color)}">[{e(who.clan)}]</span>' if who.clan else ""
     if who.clan:
@@ -137,7 +139,7 @@ def header(who: Identity, title: str, bubble: str, sub: str, stamp_text: str) ->
     return f'''<div class="head"><div class="dots"></div>
 <div class="row"><span class="tag">WoWS · ASIA</span><span class="stamp">{e(stamp_text)}</span></div>
 <div class="ident"><div class="who"><div class="name">{clan}{e(who.nickname)}</div>
-<div class="meta">账号 ID <b>{who.account_id}</b> · 亚服 · {clan_meta}{e(sub)}</div></div>
+<div class="meta">账号 ID <b>{who.account_id}</b> · 亚服 · {clan_meta}{sub_html}</div></div>
 <div class="title"><h1>{e(title)}</h1><div class="bubble">{e(bubble)}</div></div></div></div>'''
 
 
@@ -591,6 +593,8 @@ def battle_html(v: BattleDetailView) -> str:
     rank = f"伤害在这 {v.rank[1]} 场中排第 {v.rank[0]} · " if v.rank else ""
     body += f'<div class="sec"><h2>本船近期伤害</h2><span>{e(rank)}粉色为本场 · 虚线为本船场均</span></div>' + _history(v)
     notes = ["时间为记录到该场的快照时间，可能比实际结束晚几分钟。"]
+    if v.others:
+        notes.insert(0, f"这个条件下共 {v.others + 1} 场，这里只显示 1 场；查看全部请用“场次”加同样的条件。")
     if merged:
         notes.append(f"两次快照之间同一艘船打了 {n} 场，无法拆分，以上为这 {n} 场的场均。")
     if not rec.full:

@@ -113,6 +113,8 @@ def battle_text(v: BattleDetailView, with_title: bool = True) -> str:
         lines.append("本船新纪录：" + "、".join(got))
     if v.rank:
         lines.append(f"伤害在本船近 {v.rank[1]} 场中排第 {v.rank[0]}")
+    if v.others:
+        lines.append(f"这个条件下共 {v.others + 1} 场，只显示了 1 场；查看全部请用“场次”加同样的条件")
     return "\n".join(lines)
 
 

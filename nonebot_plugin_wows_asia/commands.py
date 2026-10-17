@@ -12,6 +12,7 @@ HELP = """WoWS 亚服战绩查询
 /wows 单场 [谁] [筛选|序号]　单场详情（默认最近一场）
 　谁：我（默认）/ 昵称 / id 账号ID / @某人
 　筛选（顺序随意）：今天 昨天 前天 近3天 10-15 10-12~10-15
+　　上午 下午 晚上 凌晨（可连写：今天下午）　14点后 14-18点
 　　船=大和　随机 排位 单野 组队 双排 三排　胜 负
 　　按伤害 按击沉 按经验 按侦察 按潜在（伤害最低 = 从低到高）
 　　最好 最差（按经验）　前5
@@ -44,6 +45,7 @@ class Query:
 class Filter:
     """Battle-record filter for 场次 / 单场. Dates are resolved against "now" later (views.filter_records)."""
     period: tuple | None = None  # ("ago", from_days_ago, to_days_ago) | ("date", (m, d), (m, d))
+    hours: tuple[int, int] | None = None  # time of day [start, end) in UTC+8, e.g. (12, 18) = 下午
     ship: str | None = None  # substring of the ship name
     mode: str | None = None  # pvp | rank_solo
     team: str | None = None  # solo | div | div2 | div3 (random only)
@@ -61,10 +63,14 @@ class Command:
     filter: Filter | None = None
 
 
-FILTER_USAGE = ("筛选写法：今天 / 昨天 / 前天 / 近3天 / 10-15 / 10-12~10-15，船=船名，随机 / 排位 / 单野 / 组队 / 双排 / 三排，"
+FILTER_USAGE = ("筛选写法：今天 / 昨天 / 前天 / 近3天 / 10-15 / 10-12~10-15，上午 / 下午 / 晚上 / 凌晨 / 14点后 / 14-18点，船=船名，随机 / 排位 / 单野 / 组队 / 双排 / 三排，"
                 "胜 / 负，按伤害 / 按击沉 / 按经验 / 按侦察 / 按潜在（伤害最低 等为从低到高），最好 / 最差（按经验），前N。"
                 "例：/wows 场次 昨天 船=大和")
 _DAY_WORDS = {"今天": 0, "今日": 0, "昨天": 1, "昨日": 1, "前天": 2}
+_HOUR_WORDS = {"凌晨": (0, 6), "半夜": (0, 6), "深夜": (0, 6), "早上": (6, 12), "上午": (6, 12), "中午": (11, 13),
+               "下午": (12, 18), "傍晚": (17, 19), "晚上": (18, 24), "晚间": (18, 24), "夜里": (18, 24)}
+HOURS_CN = {(0, 6): "凌晨", (6, 12): "上午", (11, 13): "中午", (12, 18): "下午", (17, 19): "傍晚", (18, 24): "晚上"}
+_PART_OF_DAY = re.compile(r"(今天|今日|昨天|昨日|前天)?(" + "|".join(_HOUR_WORDS) + ")")
 _WEEK_WORDS = {"本周", "这周", "一周", "近一周", "最近一周", "这一周"}
 _MODE_WORDS = {"随机": ("pvp", None), "随机战": ("pvp", None), "随机战斗": ("pvp", None),
                "排位": ("rank_solo", None), "排位赛": ("rank_solo", None),
@@ -126,6 +132,20 @@ def _parse_filter(parts: list[str], allow_index: bool) -> tuple[Filter, Query | 
             continue
         if tok in _DAY_WORDS:
             put("period", ("ago", _DAY_WORDS[tok], _DAY_WORDS[tok]))
+        elif m := _PART_OF_DAY.fullmatch(tok):
+            if m.group(1):
+                put("period", ("ago", _DAY_WORDS[m.group(1)], _DAY_WORDS[m.group(1)]))
+            put("hours", _HOUR_WORDS[m.group(2)])
+        elif m := re.fullmatch(r"(\d{1,2})(?:点|时)(以后|之后|后|以前|之前|前)", tok):
+            h = int(m.group(1))
+            if not 1 <= h <= 23:
+                raise WowsError("钟点请写 1～23 点，例如：14点后")
+            put("hours", (h, 24) if "后" in m.group(2) else (0, h))
+        elif m := re.fullmatch(r"(\d{1,2})(?:点|时)?(?:-|~|～|到|至)(\d{1,2})(?:点|时)", tok):
+            a, b = int(m.group(1)), int(m.group(2))
+            if not 0 <= a < b <= 24:
+                raise WowsError("时段请写成 开始点-结束点，例如：14-18点")
+            put("hours", (a, b))
         elif tok in _WEEK_WORDS:
             put("period", ("ago", 6, 0))
         elif m := re.fullmatch(r"(?:近|最近)(\d{1,3})(?:天|日)", tok):
@@ -172,6 +192,8 @@ def _parse_filter(parts: list[str], allow_index: bool) -> tuple[Filter, Query | 
         target = _target(leftover)
     if allow_index and f.get("limit") and not f.get("index"):
         f["index"], f["limit"] = f.pop("limit"), None  # “单场 3场” reads as the 3rd one
+    if f.get("hours") and not f.get("period"):
+        f["period"] = ("ago", 0, 0)  # “下午” alone means this afternoon
     if f.get("index") == 0 or f.get("limit") == 0:
         raise WowsError("序号和数量从 1 开始。")
     return Filter(**f), target

@@ -513,13 +513,21 @@ from nonebot_plugin_wows_asia.storage import BEST_DAMAGE, Record  # noqa: E402
     ("场次 打得最好的", "battles", None, Filter(sort="xp")),
     ("场次 最好 按经验", "battles", None, Filter(sort="xp")),
     ("单场 最差 第2把", "battle", None, Filter(sort="xp", asc=True, index=2)),
+    ("场次 divinesk 今天下午 船=伊吹", "battles", Query("name", "divinesk"),
+     Filter(period=("ago", 0, 0), hours=(12, 18), ship="伊吹")),
+    ("场次 下午", "battles", None, Filter(period=("ago", 0, 0), hours=(12, 18))),
+    ("场次 昨天 晚上", "battles", None, Filter(period=("ago", 1, 1), hours=(18, 24))),
+    ("场次 近3天 14点后", "battles", None, Filter(period=("ago", 2, 0), hours=(14, 24))),
+    ("场次 9点前", "battles", None, Filter(period=("ago", 0, 0), hours=(0, 9))),
+    ("场次 14-18点", "battles", None, Filter(period=("ago", 0, 0), hours=(14, 18))),
 ])
 def test_parse_battle_filters(raw, action, target, flt):
     assert parse_command(raw) == Command(action, target, flt)
 
 
 @pytest.mark.parametrize("raw", ["场次 a b", "场次 今天 昨天", "场次 排位 单野", "场次 13-40", "单场 0", "场次 近200天",
-                                 "场次 伤害最高 伤害最低", "场次 按伤害 最差", "场次 最好 最差"])
+                                 "场次 伤害最高 伤害最低", "场次 按伤害 最差", "场次 最好 最差",
+                                 "场次 下午 晚上", "场次 昨天 今天下午", "场次 18-14点", "场次 25点后"])
 def test_parse_battle_filter_errors(raw):
     with pytest.raises(WowsError):
         parse_command(raw)
@@ -546,13 +554,22 @@ def test_filter_records():
     assert len(pick(team="solo").records) == 2  # the mixed merged row is neither solo nor div
     assert all(r.stat.losses == 0 for r in pick(result="win").records)
     assert pick(sort="damage").records[0].stat.damage == 200000  # merged row ranks by its per-battle average
-    assert pick(ship="岛风").empty_reason == "记录里没有名字含“岛风”的船"
+    assert pick(ship="岛风").empty_reason == "记录里没有名字含“岛风”的船。最近打过：大和 / 得梅因"
     assert pick(sort="scouting").records and not any(not r.full for r in pick(sort="scouting").records)
     low = pick(sort="damage", asc=True)
     assert [r.stat.damage for r in low.records][:2] == [50000, 90000] and low.desc.endswith("按伤害从低到高")
     # equal values (all 0 kills here) fall back to damage in the same direction
     assert [r.stat.damage for r in pick(period=("ago", 0, 0), sort="frags", asc=True).records] == [150000, 200000]
     assert [r.stat.damage for r in pick(period=("ago", 0, 0), sort="frags").records] == [200000, 150000]
+    # time of day (records at 13:50 and 13:00 today; 14:00 / 13:30 / 13:00 yesterday, UTC+8)
+    late = pick(period=("ago", 0, 0), hours=(13, 14))
+    assert [r.stat.damage for r in late.records] == [150000, 200000] and late.desc == "今天 · 13–14点"
+    assert not pick(period=("ago", 0, 0), hours=(14, 24)).records
+    noon = pick(period=("ago", 1, 1), hours=(12, 18))
+    assert len(noon.records) == 3 and noon.desc.startswith("昨天下午")
+    # typo / homophone correction among the player's ships
+    assert pick(ship="大合").desc == "全部记录 · 大和（由“大合”纠正）" and len(pick(ship="大合").records) == 4
+    assert pick(ship="得每因").records[0].ship_id == 2
     # explicit dates resolve to the most recent past occurrence
     assert len(pick(period=("date", (10, 15), (10, 16))).records) == 5
     assert views.filter_records(recs, Filter(), infos, now, default_days=7).desc == "近 7 天"
@@ -590,9 +607,13 @@ async def test_battles_and_battle_commands():
     assert "【场次 · 今天】" in out and "2 场 1胜1负" in out and "大和（随机·双排）" in out
     out = await app.handle(USER, "单场 今天 按伤害")
     assert "第 1 / 共 2 场" in out and "伤害 150,000" in out and "侦察伤害" in out
-    assert "第 2 / 共 2 场" in await app.handle(USER, "单场 2")
+    assert "倒数第 2 场 · 按时间第 1 / 共 2 场" in await app.handle(USER, "单场 2")
     assert "只有 2 场符合条件" in await app.handle(USER, "单场 5")
     assert "没有名字含“岛风”" in await app.handle(USER, "场次 船=岛风")
+    out = await app.handle(USER, "单场 今天")
+    assert "最新一场 · 按时间第 2 / 共 2 场" in out and "共 2 场，只显示了 1 场" in out
+    assert "大和（由“大合”纠正）" in await app.handle(USER, "场次 船=大合")
+    assert "共 2 场" not in await app.handle(USER, "单场 船=得梅因")
     # @mention reads the mentioned user's binding
     assert "对方还没有绑定" in await app.handle("OneBot V11:2", "场次", mentions=["OneBot V11:3"])
     assert "【场次" in await app.handle("OneBot V11:2", "场次 今天", mentions=[USER])
@@ -690,3 +711,25 @@ def test_same_battle_window_stored_once():
     legacy = replace(rec, end_battles=None)  # rows from before 0.2.8 carry no window key
     assert storage.save_snapshot(AID, {}, [legacy, legacy]) == 2
     assert [r.end_battles for r in storage.records(AID, 0)] == [None, None, 101]
+
+
+def test_ship_match():
+    from nonebot_plugin_wows_asia.ship_match import match_ships
+    names = {1: "大和", 2: "得梅因", 3: "伊吹", 4: "伊势", 5: "圣路易斯", 6: "路易斯安那", 7: "长门", 8: "吹雪",
+             9: ["蒙大拿", "Montana"]}
+
+    def m(q):
+        r = match_ships(q, names)
+        return sorted(r.ids), r.corrected, r.suggestions
+
+    assert m("大和") == ([1], False, [])
+    assert m("吹") == ([3, 8], False, [])  # plain substring keeps every hit
+    assert m("大合") == ([1], True, [])  # homophone
+    assert m("衣吹") == ([3], True, [])
+    assert m("依势") == ([4], True, [])  # exact readings win over loose ones (势 shi vs 斯 si)
+    assert m("長門") == ([7], True, [])  # traditional characters / polyphones
+    assert m("的梅因") == ([2], True, [])
+    assert m("路易斯按那") == ([6], True, [])  # typo
+    assert m("montna") == ([9], True, [])  # other names (API / English) count too
+    assert m("伊次")[0] == [] and m("伊次")[2][0] == "伊吹"  # unsure: only suggestions
+    assert m("xyz") == ([], False, [])
