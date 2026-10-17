@@ -69,7 +69,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 
 - 插件的 `description` 写成了给 LLM 看的调用说明（指令、筛选写法、例子），AI 插件扫描命令时会原样放进提示词。
 - 使用 aigf 时需把 `nonebot_plugin_wows_asia` 加进 `AIGFM_CAPTURE_PLUGINS`，否则它不会扫描本插件的命令。
-- 识别到 aigf 合成的事件（`aigf_synthetic` 标记）时，图片后会附一段文字结果（数字精确，供 LLM 读取；群里也能看到）。
+- 识别到 aigf 合成的事件（`aigf_synthetic` 标记）且开启 `WOWS_AI_CAPTION=true` 时，图片后会附一段文字结果（数字精确，供 LLM 读取；群里也能看到）。默认关闭，只发图片；模型不能识图时建议开启。
 - 查自己需要 AI 插件传入提问者的 `user_id`；`@群友` 会查该群友绑定的账号。
 
 ## 安装
@@ -104,6 +104,7 @@ plugins = ["nonebot_plugin_wows_asia"]
 | --- | --- | --- |
 | `WOWS_APPLICATION_ID` | 空 | **必填**。未配置时插件可加载，但查询会提示管理员配置，定时任务不启动 |
 | `WOWS_RENDER_MODE` | `image` | `image` 图片卡片 / `text` 纯文字 |
+| `WOWS_AI_CAPTION` | `false` | AI 插件调用时在图片下附带文字数据；默认只发图片 |
 | `WOWS_RENDER_SCALE` | `1.5` | 截图倍率（1–3），越大越清晰、图片越大 |
 | `WOWS_BROWSER_PATH` | 空 | 使用系统已有 Chromium/Chrome 的可执行文件路径 |
 | `WOWS_POLL_MINUTES` | `10` | 快照检查间隔（3–720 分钟） |

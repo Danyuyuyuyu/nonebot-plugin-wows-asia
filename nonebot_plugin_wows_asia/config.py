@@ -11,6 +11,8 @@ class Config(BaseModel):
     wows_command_priority: int = Field(default=10, ge=1)
     # Card output. "text" disables the browser entirely.
     wows_render_mode: Literal["image", "text"] = "image"
+    # AI 插件调用时，是否在图片下方附带文字数据（供大模型读取准确数值；群里也能看到）
+    wows_ai_caption: bool = False
     wows_render_scale: float = Field(default=1.5, ge=1, le=3)
     wows_browser_path: str = ""
     # Snapshot tracking for recent stats / per-battle rows.

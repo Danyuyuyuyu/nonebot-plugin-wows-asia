@@ -109,7 +109,7 @@ def mention_keys(bot: Bot, args: Message) -> list[str]:
 @wows.handle()
 async def handle_wows(bot: Bot, event: Event, args: Message = CommandArg()):
     # nonebot-plugin-aigf-master marks the events it synthesises; add a text line so the LLM gets exact numbers
-    ai = bool(getattr(event, "aigf_synthetic", False))
+    ai = bool(getattr(event, "aigf_synthetic", False)) and config.wows_ai_caption
     reply = await app.handle(user_key(bot, event), args.extract_plain_text(), mentions=mention_keys(bot, args), ai=ai)
     if isinstance(reply, tuple):
         image, caption = reply
