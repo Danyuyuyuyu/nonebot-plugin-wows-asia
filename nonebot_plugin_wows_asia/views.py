@@ -254,17 +254,27 @@ def state_hidden(who: Identity, title: str) -> StateView:
                      "如果是你自己的账号：在游戏设置中关闭“隐藏战绩”，稍后再查询即可。")
 
 
-def state_tracking(who: Identity, baseline_at: int, interval: str) -> StateView:
-    return StateView("tracking", "最近战绩", who, f"开始记录 · {fmt_time(baseline_at, '%Y-%m-%d %H:%M')}",
+def career_line(career: Stat | None) -> str:
+    """One-line random career summary, shown on 'no recent data' cards so nobody needs a second query."""
+    if career is None or not career.battles:
+        return ""
+    wr, dmg = career.win_rate, career.per("damage")
+    return (f"生涯随机 {career.battles:,} 场 · 胜率 {wr:.1f}%" if wr is not None else f"生涯随机 {career.battles:,} 场") + \
+        (f" · 场均伤害 {dmg:,.0f}" if dmg is not None else "") + "。"
+
+
+def state_tracking(who: Identity, baseline_at: int, interval: str, career: Stat | None = None,
+                   title: str = "最近战绩") -> StateView:
+    return StateView("tracking", title, who, f"开始记录 · {fmt_time(baseline_at, '%Y-%m-%d %H:%M')}",
                      "还没有足够的近期数据",
                      f"已保存第一份战绩快照。之后{interval}，有新战斗就会记下每一场的数据。",
-                     "现在可以先用 /wows 查看总战绩；打几场之后再查最近战绩就能看到场次明细。")
+                     career_line(career) + "打几场之后再查就能看到场次明细。")
 
 
-def state_idle(who: Identity, baseline_at: int) -> StateView:
+def state_idle(who: Identity, baseline_at: int, career: Stat | None = None) -> StateView:
     return StateView("idle", "最近战绩", who, f"记录中 · 自 {fmt_time(baseline_at, '%m-%d')} 起",
                      "近 7 天没有新战斗", "最近 7 天里没有记录到随机或排位战斗。",
-                     "出海打几场之后再来查吧～ 总战绩可以用 /wows 查看。")
+                     career_line(career) + "出海打几场之后再来查吧～")
 
 
 def state_quota(who: Identity) -> StateView:

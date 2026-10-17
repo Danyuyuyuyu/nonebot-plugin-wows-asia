@@ -733,3 +733,26 @@ def test_ship_match():
     assert m("montna") == ([9], True, [])  # other names (API / English) count too
     assert m("伊次")[0] == [] and m("伊次")[2][0] == "伊吹"  # unsure: only suggestions
     assert m("xyz") == ([], False, [])
+
+
+def test_ai_guide_examples_parse():
+    import re
+
+    from nonebot_plugin_wows_asia import AI_GUIDE
+    assert len(AI_GUIDE) <= 900  # sent with every LLM request: keep it short
+    line = next(x for x in AI_GUIDE.splitlines() if x.strip().startswith("例："))
+    examples = re.findall(r"→(wows [^；。]+)", line)
+    assert len(examples) >= 6
+    actions = {"最近": "recent", "场次": "battles", "单场": "battle", "绑定": "bind"}
+    for example in examples:
+        args = example.split()[1:]
+        cmd = parse_command(" ".join(args))
+        assert cmd.action == actions.get(args[0], "total"), example
+
+
+def test_no_data_cards_carry_career_summary():
+    who = views.Identity(AID, "Example_Player")
+    career = Stat(battles=1000, wins=550, losses=450, damage=80_000_000)
+    for st in (views.state_tracking(who, 1792130400, "每 3 分钟检查一次", career), views.state_idle(who, 1792130400, career)):
+        assert "生涯随机 1,000 场 · 胜率 55.0% · 场均伤害 80,000" in st.tip and "/wows" not in st.tip
+    assert views.state_tracking(who, 1792130400, "x").tip.startswith("打几场")

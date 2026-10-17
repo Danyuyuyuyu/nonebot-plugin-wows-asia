@@ -21,23 +21,18 @@ from .renderer import CardRenderer  # noqa: E402
 from .storage import Storage  # noqa: E402
 from .tracker import Tracker  # noqa: E402
 
+# nonebot-plugin-aigf-master 把 metadata.description 原样写进每次对话的提示词（“- wows - 说明”），
+# 所以这里写给 LLM 看：选哪个指令、参数怎么写、结果怎么理解。每个例子都由测试交给解析器检查。
+AI_GUIDE = """窝窝/WoWS 亚服战绩查询。用户明确要查战绩时才调用，参数空格分隔、顺序随意；一个请求只调用一次。
+  选指令：总战绩/生涯→wows [谁]；近况/最近战绩→wows 最近 [谁]；某段时间/某艘船/打了哪些场→wows 场次 [谁] [筛选]（列出全部，默认近7天）；只要其中一把的细节→wows 单场 [谁] [筛选] [第N把]（默认最新一把，第N把=从最新往前数）；拿不准时用 场次。
+  谁：查提问者本人时不写（传其 user_id，插件按绑定查找，不要自己填昵称）；@群友；玩家完整昵称；id 账号ID。不要猜测或编造昵称。
+  筛选：今天 昨天 前天 近N天 本周 10-15 10-12~10-15｜上午 下午 晚上 凌晨 今天下午 14点后 14-18点｜船=船名（错字、同音字会自动纠正）｜随机 排位 单野 组队 双排 三排｜胜 负｜按伤害/击沉/经验/侦察/潜在（从高到低），伤害最低、击沉最少等（从低到高），最好/最差（按经验）｜前N。
+  例：查查我最近的战绩→wows 最近；我昨天打得怎么样→wows 场次 昨天；看看张三今天下午打的伊吹→wows 场次 张三 今天下午 船=伊吹；张三伤害最高的一把→wows 单场 张三 按伤害；近3天最差的5把→wows 场次 近3天 最差5把；张三总战绩→wows 张三；绑定我的号 ABC→wows 绑定 ABC。
+  看结果：卡片会直接发到群里，简短点评即可，不用逐项复述；“按时间第2/共2场”指发生顺序。最近战绩显示还没有数据时卡片已附生涯概要，不要再自动查总战绩；提示未绑定时请用户发“wows 绑定 昵称”（只有用户给出昵称并要求绑定才代为绑定）；提示“是不是想查”时可换成建议的船名重查一次；只能查到开始记录之后的场次。"""
+
 __plugin_meta__ = PluginMetadata(
     name="WoWS 亚服战绩",
-    # nonebot-plugin-aigf-master 把这一行原样写进 LLM 的“可用功能”清单，所以写成调用说明
-    description=(
-        "窝窝(WoWS)亚服战绩。参数空格分隔、顺序随意。wows [谁] 总战绩；wows 最近 [谁] 近7天汇总；"
-        "wows 场次 [谁] [筛选] 列出符合条件的全部场次；wows 单场 [谁] [筛选|序号] 只看其中一场的详情。"
-        "选择规则：问“打的某船”“今天/下午打的”等可能有多场的，一律用 场次；只有明确要“那一把/最高的一把/第N把”才用 单场"
-        "（单场默认最新一场，序号 N 为从最新往前数第 N 场）。"
-        "谁=我(默认,需传 user_id)/玩家昵称/id 账号ID/@群友。"
-        "筛选：今天|昨天|前天|近N天|MM-DD|MM-DD~MM-DD；上午|下午|晚上|凌晨（可连写 今天下午）|14点后|14-18点；"
-        "船=船名（错字、同音字会自动纠正）；随机|排位|单野|组队|双排|三排；胜|负；"
-        "按伤害|按击沉|按经验|按侦察|按潜在（从高到低），伤害最低|击沉最少|经验最低 等（从低到高）；"
-        "最好|最差（按经验高低）；前N。"
-        "例：看看张三今天下午打的伊吹→wows 场次 张三 今天下午 船=伊吹；今天伤害最高的一把→wows 单场 今天 按伤害；"
-        "近3天打得最差的5把→wows 场次 近3天 最差5把。"
-        "只能查到绑定/首次查询之后记录的场次；未绑定时先让用户发 wows 绑定 昵称"
-    ),
+    description=AI_GUIDE,
     usage=HELP,
     type="application",
     homepage="https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia",
@@ -49,27 +44,15 @@ __plugin_meta__ = PluginMetadata(
         commands=[
             Command(
                 command="wows",
-                description=(
-                    "查询 WoWS 亚服总战绩或最近战绩；AI 调用时把查询参数放入 parts，"
-                    "用户说最近/近期时必须保留“最近”参数，用户说总战绩/生涯时不要添加“最近”；"
-                    "不要把 /wows 前缀放进 command。"
-                    "如果当前调用身份没有绑定账号，或者插件返回帮助信息/未绑定提示，"
-                    "不要重复调用 wows，应先引导用户绑定 WoWS 亚服账号。"
-                    "只有用户明确提供昵称或账号 ID 并要求绑定时，才调用绑定命令，"
-                    "不能猜测或编造玩家昵称。"
-                ),
-                params=[
-                    "未绑定处理：如果查询自己的战绩时发现没有绑定，回复用户："
-                    "请先发送「wows 绑定 你的亚服昵称」，或发送「wows 绑定 id 账号ID」；"
-                    "绑定成功后再说「查我的 WoWS 战绩」或「查我最近的战绩」。"
-                    "没有昵称或账号 ID 时，不要自动调用绑定。",
-                ],
+                description="查询 WoWS 亚服总战绩、最近战绩、场次列表和单场详情，可按时间、时段、船、模式、胜负筛选和排序",
+                params=["谁：不写=自己（需先绑定）/ 玩家昵称 / id 账号ID / @群友",
+                        "筛选：今天 下午 近3天 船=大和 排位 胜 按伤害 最差 前5 等，详见 /wows 帮助"],
                 examples=[
-                    Example(exec="wows 最近", description="查询当前调用身份绑定账号的最近战绩"),
+                    Example(exec="wows 最近", description="查询自己绑定账号的最近战绩"),
                     Example(exec="wows 张三", description="查询亚服玩家张三的总战绩"),
                     Example(exec="wows id 2000000001", description="按账号 ID 查询总战绩"),
-                    Example(exec="wows 单场 今天 按伤害", description="当前调用身份今天伤害最高的一场的详情"),
-                    Example(exec="wows 场次 昨天 船=大和", description="当前调用身份昨天打的所有大和"),
+                    Example(exec="wows 单场 今天 按伤害", description="自己今天伤害最高的一场的详情"),
+                    Example(exec="wows 场次 昨天 船=大和", description="自己昨天打的所有大和"),
                     Example(exec="wows 场次 张三 今天下午 船=伊吹", description="张三今天下午打的所有伊吹"),
                     Example(exec="wows 场次 近3天 排位", description="近 3 天的排位场次列表"),
                     Example(exec="wows 场次 近3天 最差5把", description="近 3 天经验最低（打得最差）的 5 场"),

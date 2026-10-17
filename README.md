@@ -69,7 +69,9 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 
 ## 给 AI 插件调用（nonebot-plugin-aigf-master 等）
 
-- 插件的 `description` 写成了给 LLM 看的调用说明（指令、筛选写法、例子），AI 插件扫描命令时会原样放进提示词。
+- 插件的 `description` 写成了给 LLM 看的调用说明（怎么选指令、筛选写法、例子、怎么理解结果），AI 插件扫描命令时会原样放进每次对话的提示词，因此控制在 900 字以内；说明里的例子都由测试交给解析器检查，不会和实际写法脱节。
+- **注意 aigf 的命令学习**：aigf 会从群聊里“学习”命令，同名命令学到后会**覆盖**插件自己的说明。如果 AI 用法明显过时，检查 aigf 数据目录下的 `learned_commands.json`，删掉 `wows` / `窝窝战绩` 条目后重启。
+- 真寻 `PluginExtraData` 里的命令信息只用于真寻自身的帮助展示，aigf 不读取，写成普通用户看的简介。
 - 使用 aigf 时需把 `nonebot_plugin_wows_asia` 加进 `AIGFM_CAPTURE_PLUGINS`，否则它不会扫描本插件的命令。
 - 识别到 aigf 合成的事件（`aigf_synthetic` 标记）且开启 `WOWS_AI_CAPTION=true` 时，图片后会附一段文字结果（数字精确，供 LLM 读取；群里也能看到）。默认关闭，只发图片；模型不能识图时建议开启。
 - 查自己需要 AI 插件传入提问者的 `user_id`；`@群友` 会查该群友绑定的账号。
@@ -83,7 +85,7 @@ WG 公开 API **没有逐场战斗记录接口**。插件定时保存每艘船�
 # 从 GitHub 安装
 pip install "git+https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia.git"
 # 或安装发布的 wheel
-pip install nonebot_plugin_wows_asia-0.3.0-py3-none-any.whl
+pip install nonebot_plugin_wows_asia-0.3.1-py3-none-any.whl
 
 # 安装截图用的 Chromium（Linux 服务器可加 --with-deps 自动装系统依赖）
 playwright install chromium

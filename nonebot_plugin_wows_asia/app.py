@@ -185,8 +185,9 @@ class WowsApp:
         start7 = views.day_of(now).toordinal() - 6
         if not any(views.day_of(r.captured_at).toordinal() >= start7 for r in records):
             if result.baseline_created or now - baseline < 86400:
-                return self._state(views.state_tracking(who, baseline, self.tracker.interval_text()))
-            return self._state(views.state_idle(who, baseline))
+                return self._state(views.state_tracking(who, baseline, self.tracker.interval_text(),
+                                                        views.career_random(account)))
+            return self._state(views.state_idle(who, baseline, views.career_random(account)))
         infos = await self.api.ships_info(list({r.ship_id for r in records}))
         view = views.build_recent(who, views.career_random(account), records, infos, baseline, now)
         return Card(cards.recent_html(view), formatting.recent_text(view), formatting.recent_caption(view))
@@ -208,7 +209,8 @@ class WowsApp:
         records = self.storage.records(account_id, now - self.tracker.record_days * 86400)
         if not records:
             if result.baseline_created or now - baseline < 86400:
-                return self._state(views.state_tracking(who, baseline, self.tracker.interval_text()))
+                return self._state(views.state_tracking(who, baseline, self.tracker.interval_text(),
+                                                        views.career_random(account), title))
             return self._state(views.state_nomatch(who, title, "全部记录", "还没有记录到任何场次", baseline))
         infos = await self.api.ships_info(list({r.ship_id for r in records}))
         # 单场 / ship / sort queries look at every kept record; a plain 场次 list defaults to 7 days
