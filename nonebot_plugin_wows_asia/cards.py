@@ -5,7 +5,8 @@ from datetime import datetime
 from html import escape
 
 from .stats import Stat
-from .views import CST, RecentView, StateView, TotalView, Identity
+from .storage import BEST_DAMAGE, BEST_FRAGS, BEST_XP
+from .views import CST, BattleDetailView, BattlesView, Identity, RecentView, StateView, TotalView
 
 PINK, PINK_D, PINK_S = "#E0628C", "#B4426C", "#FFE3EC"
 LAV, LAV_S = "#8C7BD8", "#ECE8FB"
@@ -88,6 +89,7 @@ body{width:960px;padding:28px;background:#FBF1F5;color:#3B2F3A;font-family:"Noto
 .merged{background:#FAF7FB;border-radius:10px;padding:10px 8px;margin:4px -8px}
 .note2{font-size:12px;color:#86788A;margin-top:10px;line-height:1.6}
 .empty{font-size:14px;color:#86788A;padding:18px 0;text-align:center}
+.nb{display:inline-block;font-size:12px;font-weight:800;color:#9A6A12;background:#FFF1D2;border:1px solid #F3D9A0;border-radius:6px;padding:2px 8px;margin-right:6px}
 .state{padding:30px 36px;display:flex;gap:28px;align-items:center}
 .state .ico{width:84px;height:84px;border-radius:24px;display:grid;place-items:center;flex-shrink:0}
 .state h3{margin:0;font-size:24px;font-weight:800}.state p{margin:8px 0 0;font-size:15px;color:#86788A;line-height:1.7}
@@ -177,7 +179,9 @@ _I = {
 KPI_ICONS = {"战斗场数": ("anchor", LAV), "场均伤害": ("burst", PINK), "场均击沉": ("cross", PINK),
          "存活率": ("shield", WIN), "场均经验": ("star", "#D9A13B"), "主炮命中率": ("target", LAV),
          "单场最高伤害": ("burst", PINK), "单场最高击沉": ("cross", PINK), "单场最高经验": ("star", "#D9A13B"),
-         "单场最高侦察": ("eye", LAV)}
+         "单场最高侦察": ("eye", LAV), "伤害": ("burst", PINK), "击沉": ("cross", PINK), "经验": ("star", "#D9A13B"),
+         "侦察伤害": ("eye", LAV), "潜在伤害": ("shield", "#C95C6D"), "点亮": ("eye", "#3FB0C4"),
+         "鱼雷命中率": ("target", "#3FB0C4"), "击落飞机": ("cross", "#3FB0C4")}
 
 
 def icon(label: str, size: int = 18, cls: str = "kico") -> str:
@@ -364,6 +368,8 @@ def _battle_row(r) -> str:
     chip = f'<span class="tchip" style="background:{tcolor}">{e(r.ship_type)}</span>' if r.ship_type != "其他" else ""
     extra = f" · {s.battles} 场合计" if merged and not r.team else ""  # team counts already add up to N
     tsub = f"<small>{e(r.time_end)}–</small>" if merged and r.time_end else ""
+    if getattr(r, "date", ""):
+        tsub = f"<small>{e(r.date)}{' ' + e(r.time_end) + '–' if merged and r.time_end else ''}</small>"
     frags = f"{s.frags / s.battles:.1f}" if merged else f"{s.frags}"
     return f'''<div class="bt{' merged' if merged else ''}"><div class="tm">{tsub}{e(r.time)}</div>
 <div class="res{' m' if merged else ''}" style="background:{col}">{res}</div>
@@ -428,3 +434,167 @@ def state_html(v: StateView, now: int) -> str:
     h = header(v.who, v.card_title, bubble, v.sub, stamp(now)[5:])
     return page(f'''<div class="card">{h}<div class="state"><div class="ico" style="background:{bg}">{icon}</div>
 <div><h3>{e(v.heading)}</h3><p>{e(v.text)}</p><div class="tip">{e(v.tip)}</div></div></div></div>''')
+
+
+# ---------------- 场次 / 单场 ----------------
+def _list_rows(v: BattlesView) -> str:
+    out = '<div class="bt hd"><div>时间</div><div>结果</div><div>战舰</div><div>伤害</div><div>击沉</div><div>经验</div><div>状态</div></div>'
+    if v.groups:
+        for g in v.groups:
+            gs = g.stat
+            summary = f"{gs.battles} 场 · {gs.wins} 胜 {gs.losses} 负" + (f" {gs.draws} 平" if gs.draws else "")
+            out += f'<div class="day">{e(g.label)}<span>{summary}</span></div>' + "".join(_battle_row(r) for r in g.rows)
+    else:
+        out += "".join(_battle_row(r) for r in v.rows)
+    return out
+
+
+def battles_html(v: BattlesView) -> str:
+    s, c = v.summary, v.base
+    wr = s.win_rate
+    bubble = "一起来复盘吧～"
+    if wr is not None and s.battles >= 3:
+        bubble = "这几把打得漂亮～" if wr >= 60 else ("有点难打呢，摸摸～" if wr < 40 else bubble)
+    h = header(v.who, "场次查询", bubble, v.desc, f"记录自 {v.tracking_since}")
+    body = '<div class="body"><div class="hero">' + donut(s, "胜率") + '<div class="kpis">'
+    body += kpi("战斗场数", f"{s.battles}", f"{s.wins} 胜 {s.losses} 负" + (f" {s.draws} 平" if s.draws else ""))
+    body += kpi("场均伤害", n0(s.per("damage")), *_delta(s.per("damage"), c.per("damage"), "rel"))
+    body += kpi("场均击沉", "—" if s.per("frags") is None else f"{s.per('frags'):.2f}", *_delta(s.per("frags"), c.per("frags"), "abs2"))
+    body += kpi("存活率", pct(s.survival), *_delta(s.survival, c.survival, "pp"), meter=s.survival)
+    body += kpi("场均经验", n0(s.per("xp")), *_delta(s.per("xp"), c.per("xp"), "rel"))
+    body += kpi("主炮命中率", pct(s.hit_rate), *_delta(s.hit_rate, c.hit_rate, "pp"), meter=s.hit_rate)
+    body += "</div></div>"
+    split = ""
+    if v.teams:
+        split = " · 随机中 " + " / ".join(f"{n} {k}" for n, k in zip(("单野", "双排", "三排"), v.teams) if k)
+    order = f"按{v.sorted_by}从高到低" if v.sorted_by else "时间倒序"
+    body += f'<div class="sec"><h2>场次明细</h2><span>{e(order)} · 对比基准：{e(v.base_label)}{split}</span></div>'
+    body += '<div class="panel" style="padding:8px 20px 12px">' + _list_rows(v)
+    more = f"共 {v.hidden_rows + len(v.rows)} 场符合条件，只列出前 {len(v.rows)} 场。" if v.hidden_rows else ""
+    body += f'<div class="note2">“比本船均值”对比的是该船在这场之前的生涯场均伤害；灰底行为两次快照之间同一艘船的多场合计，数值为场均。{more}</div></div>'
+    body += foot("场次查询基于战绩快照差值计算", v.generated_at) + "</div>"
+    return page(f'<div class="card">{h}{body}</div>')
+
+
+def _vs(cur: float | None, base: float | None, kind: str) -> tuple[str, str]:
+    """Compare one battle with the ship's career average."""
+    if cur is None or base is None:
+        return "", ""
+    if kind == "rel":
+        if not base:
+            return "", ""
+        d = (cur / base - 1) * 100
+        txt = f"{abs(d):.0f}%"
+    elif kind == "abs":
+        d = cur - base
+        txt = f"{abs(d):.2f}"
+    else:
+        d = cur - base
+        txt = f"{abs(d):.1f}%"
+    if abs(d) < 0.05:
+        return "与本船场均持平", ""
+    return (f"比本船场均 +{txt}", "up") if d > 0 else (f"比本船场均 −{txt}", "down")
+
+
+def _rate(hits: int, shots: int) -> float | None:
+    return hits / shots * 100 if shots else None
+
+
+def _history(v: BattleDetailView) -> str:
+    if len(v.history) < 2:
+        return '<div class="panel"><div class="empty">本船记录到的场次还太少</div></div>'
+    W, H, top = 796, 150, 18
+    mx = max(d for _, d, _ in v.history) or 1
+    avg = v.ship_career.per("damage") if v.ship_career else None
+    if avg:
+        mx = max(mx, avg)
+    n = len(v.history)
+    step = W / n
+    bw = min(46, step * 0.6)
+    g = ""
+    for i, (label, dmg, this) in enumerate(v.history):
+        hgt = max(dmg / mx * (H - top - 22), 3)
+        x = i * step + (step - bw) / 2
+        y = H - 22 - hgt
+        col = PINK if this else "#D9D1EE"
+        g += f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{hgt:.1f}" rx="6" fill="{col}"/>'
+        g += (f'<text x="{x + bw / 2:.1f}" y="{y - 5:.1f}" font-size="11" fill="{INK if this else SUB}" '
+              f'font-weight="{800 if this else 500}" text-anchor="middle">{dmg / 1000:.0f}k</text>')
+        g += f'<text x="{x + bw / 2:.1f}" y="{H - 6}" font-size="11" fill="{PINK_D if this else SUB}" text-anchor="middle">{e(label)}</text>'
+    if avg:
+        ya = H - 22 - avg / mx * (H - top - 22)
+        g += f'<line x1="0" x2="{W}" y1="{ya:.1f}" y2="{ya:.1f}" stroke="{INK}" stroke-opacity=".35" stroke-dasharray="5 5"/>'
+    return f'<div class="panel" style="padding:14px 20px 8px"><svg width="{W}" height="{H}">{g}</svg></div>'
+
+
+def battle_html(v: BattleDetailView) -> str:
+    r, rec = v.row, v.record
+    s, c = rec.stat, v.ship_career
+    n = s.battles
+    merged = n > 1
+    if merged:
+        res, col = f"{s.wins}胜{s.losses}负" + (f"{s.draws}平" if s.draws else ""), LAV
+    elif s.wins:
+        res, col = "胜利", WIN
+    elif s.losses:
+        res, col = "失败", "#B9B2C7"
+    else:
+        res, col = "平局", DRAW
+    bubble = {"胜利": "赢下来啦～", "失败": "下一把一定行～", "平局": "势均力敌～"}.get(res, "几把合在一起看哦～")
+    if rec.best:
+        bubble = "破纪录了，好厉害！"
+    h = header(v.who, "单场详情", bubble, v.position, v.when)
+    tcolor = TYPE_COLOR.get(r.ship_type, TYPE_COLOR["其他"])
+    chip = f'<span class="tchip" style="background:{tcolor}">{e(r.ship_type)}</span>' if r.ship_type != "其他" else ""
+    tags = r.mode + (f" · {r.team}" if r.team else "") + (f" · {n} 场合计（以下为场均）" if merged else "")
+    badges = "".join(f'<span class="nb">★ 本船新纪录：{label}</span>' for bit, label in
+                     ((BEST_DAMAGE, "伤害"), (BEST_FRAGS, "击沉"), (BEST_XP, "经验")) if rec.best & bit)
+    badge_div = f'<div style="margin-top:8px">{badges}</div>' if badges else ""
+    alive = f"{s.survived}/{n} 存活" if merged else ("存活" if s.survived else "沉没")
+    acol = WIN if s.survived == n else (BAD if not s.survived else INK)
+    body = (f'<div class="body"><div class="panel" style="display:flex;align-items:center;gap:22px;padding:18px 24px">'
+            f'<div class="res" style="background:{col};font-size:{16 if merged else 22}px;width:96px;padding:14px 0;border-radius:14px">{e(res)}</div>'
+            f'<div style="flex:1;min-width:0"><div style="font-size:28px;font-weight:800;line-height:1.35">{e(r.ship)}</div>'
+            f'<div style="font-size:14px;color:{SUB};margin-top:4px">{chip}{e(r.tier)} 级 · {e(tags)}</div>{badge_div}</div>'
+            f'<div style="text-align:right"><div style="font-size:24px;font-weight:800;color:{acol}">{e(alive)}</div>'
+            f'<div style="font-size:13px;color:{SUB};margin-top:4px">{e(v.when)}</div></div></div>')
+
+    def per(attr: str) -> float:
+        return getattr(s, attr) / n
+
+    def base(attr: str) -> float | None:
+        return c.per(attr) if c else None
+
+    def cnt(attr: str, digits: int = 1) -> str:
+        return f"{per(attr):.{digits}f}" if merged else f"{getattr(s, attr):,}"
+
+    dmg_base = rec.career_avg_damage or base("damage")
+    tiles = [kpi("伤害", n0(per("damage")), *_vs(per("damage"), dmg_base, "rel")),
+             kpi("击沉", cnt("frags", 2), *_vs(per("frags"), base("frags"), "abs")),
+             kpi("经验", n0(per("xp")), *_vs(per("xp"), base("xp"), "rel"))]
+    if rec.full:
+        tiles += [kpi("侦察伤害", n0(per("scouting")), *_vs(per("scouting"), base("scouting"), "rel")),
+                  kpi("潜在伤害", n0(per("potential")), *_vs(per("potential"), base("potential"), "rel")),
+                  kpi("点亮", cnt("spotted"), *_vs(per("spotted"), base("spotted"), "abs"))]
+    mb, cmb = _rate(s.hits, s.shots), (_rate(c.hits, c.shots) if c else None)
+    tiles.append(kpi("主炮命中率", pct(mb), *(_vs(mb, cmb, "pp") if s.shots else ("本场未开主炮", "")), meter=mb))
+    if rec.full:
+        tp, ctp = _rate(s.torp_hits, s.torp_shots), (_rate(c.torp_hits, c.torp_shots) if c else None)
+        tiles.append(kpi("鱼雷命中率", pct(tp), *(_vs(tp, ctp, "pp") if s.torp_shots else ("本场未发射鱼雷", "")), meter=tp))
+        tiles.append(kpi("击落飞机", cnt("planes"), *_vs(per("planes"), base("planes"), "abs")))
+    body += '<div class="sec"><h2>本场数据</h2><span>对比本船生涯场均</span></div><div class="kpis">' + "".join(tiles) + "</div>"
+    if rec.full:
+        items = [("主炮击沉", cnt("mb_frags")), ("鱼雷击沉", cnt("torp_frags")), ("副炮击沉", cnt("sec_frags")),
+                 ("副炮命中率", pct(_rate(s.sec_hits, s.sec_shots))), ("占点 / 防点", f"{cnt('cap')} / {cnt('defend')}")]
+        body += (f'<div class="strip" style="grid-template-columns:repeat({len(items)},1fr);margin-top:12px">'
+                 + "".join(f'<div><div class="l">{e(k)}</div><div class="v">{e(x)}</div></div>' for k, x in items) + "</div>")
+    rank = f"伤害在这 {v.rank[1]} 场中排第 {v.rank[0]} · " if v.rank else ""
+    body += f'<div class="sec"><h2>本船近期伤害</h2><span>{e(rank)}粉色为本场 · 虚线为本船场均</span></div>' + _history(v)
+    notes = ["时间为记录到该场的快照时间，可能比实际结束晚几分钟。"]
+    if merged:
+        notes.append(f"两次快照之间同一艘船打了 {n} 场，无法拆分，以上为这 {n} 场的场均。")
+    if not rec.full:
+        notes.append("这场记录于插件 0.2.7 之前，只有基础数据（无侦察、潜在伤害等）。")
+    body += f'<div class="note2">{e(" ".join(notes))}</div>'
+    body += foot("单场数据基于战绩快照差值计算", v.generated_at) + "</div>"
+    return page(f'<div class="card">{h}{body}</div>')

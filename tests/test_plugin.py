@@ -489,3 +489,130 @@ async def test_fast_lane_polling():
     clock.t += 180
     assert await polled_ids() == {"42", str(AID)}
     assert Tracker(tracker.api, storage, poll_minutes=5, fast_minutes=5).tick_minutes == 5  # fast >= poll: off
+
+
+# ---------------- 场次 / 单场 (0.2.7) ----------------
+from nonebot_plugin_wows_asia.commands import Filter  # noqa: E402
+from nonebot_plugin_wows_asia.storage import BEST_DAMAGE, Record  # noqa: E402
+
+
+@pytest.mark.parametrize(("raw", "action", "target", "flt"), [
+    ("单场 今天 按伤害", "battle", None, Filter(period=("ago", 0, 0), sort="damage")),
+    ("场次 我 昨天 船=大和", "battles", None, Filter(period=("ago", 1, 1), ship="大和")),
+    ("场次 张三 排位 近3天 前5", "battles", Query("name", "张三"), Filter(period=("ago", 2, 0), mode="rank_solo", limit=5)),
+    ("单场 3", "battle", None, Filter(index=3)),
+    ("单场 第2把 伤害最高", "battle", None, Filter(index=2, sort="damage")),
+    ("场次 id 7 组队 胜", "battles", Query("id", "7"), Filter(mode="pvp", team="div", result="win")),
+    ("场次 10-12~10-15 双排 按经验", "battles", None, Filter(period=("date", (10, 12), (10, 15)), mode="pvp", team="div2", sort="xp")),
+    ("场次 船：得梅因 10月15日", "battles", None, Filter(period=("date", (10, 15), (10, 15)), ship="得梅因")),
+])
+def test_parse_battle_filters(raw, action, target, flt):
+    assert parse_command(raw) == Command(action, target, flt)
+
+
+@pytest.mark.parametrize("raw", ["场次 a b", "场次 今天 昨天", "场次 排位 单野", "场次 13-40", "单场 0", "场次 近200天"])
+def test_parse_battle_filter_errors(raw):
+    with pytest.raises(WowsError):
+        parse_command(raw)
+
+
+def _rec(ts, ship=1, mode="pvp", dmg=100000, w=1, div=(1, 0, 0), n=1, full=True):
+    return Record(AID, ts, ts - 600, ship, mode, S(battles=n, wins=w, losses=n - w, damage=dmg, survived=1), 90000.0,
+                  div if mode == "pvp" else None, full)
+
+
+def test_filter_records():
+    from nonebot_plugin_wows_asia.api import ShipInfo
+    now = 1792130400  # 2026-10-16 14:00 CST
+    infos = {1: ShipInfo(1, "大和", 10, "Battleship"), 2: ShipInfo(2, "得梅因", 10, "Cruiser")}
+    recs = [_rec(now - 600, 1, dmg=150000), _rec(now - 3600, 2, dmg=200000, div=(0, 1, 0)),
+            _rec(now - 86400, 1, dmg=90000, w=0), _rec(now - 86400 - 1800, 1, mode="rank_solo", dmg=50000),
+            _rec(now - 86400 - 3600, 1, dmg=300000, n=2, div=(1, 1, 0), w=1, full=False)]
+    pick = lambda **kw: views.filter_records(recs, Filter(**kw), infos, now, default_days=None)  # noqa: E731
+    assert [r.stat.damage for r in pick(period=("ago", 0, 0), sort="damage").records] == [200000, 150000]
+    p = pick(period=("ago", 1, 1), ship="大")
+    assert len(p.records) == 3 and p.desc == "昨天 · 大和"
+    assert [r.mode for r in pick(mode="rank_solo").records] == ["rank_solo"]
+    assert [r.ship_id for r in pick(team="div2").records] == [2]
+    assert len(pick(team="solo").records) == 2  # the mixed merged row is neither solo nor div
+    assert all(r.stat.losses == 0 for r in pick(result="win").records)
+    assert pick(sort="damage").records[0].stat.damage == 200000  # merged row ranks by its per-battle average
+    assert pick(ship="岛风").empty_reason == "记录里没有名字含“岛风”的船"
+    assert pick(sort="scouting").records and not any(not r.full for r in pick(sort="scouting").records)
+    # explicit dates resolve to the most recent past occurrence
+    assert len(pick(period=("date", (10, 15), (10, 16))).records) == 5
+    assert views.filter_records(recs, Filter(), infos, now, default_days=7).desc == "近 7 天"
+
+
+async def test_tracker_records_details_bests_and_upgrade():
+    fake, clock, storage, tracker, _ = make_env()
+    tracker.touch(AID, "Example_Player")
+    await tracker.refresh(AID, last_battle_time=fake.account["last_battle_time"])
+    clock.t += 600
+    fake.play(1, dmg=400000, scouting=45000, potential=2000000, spotted=4, planes=7, torp=(0, 0))
+    assert await tracker.poll_all() == 1
+    [rec] = storage.records(AID, 0)
+    assert rec.full and rec.stat.scouting == 45000 and rec.stat.potential == 2000000 and rec.stat.spotted == 4
+    assert rec.best & BEST_DAMAGE  # 400k beats the stored max_damage_dealt
+    # a pre-0.2.7 snapshot (full=0) is rewritten on the next tick even without a new battle
+    storage._run("UPDATE ship_state SET full=0 WHERE account_id=?", (AID,))
+    assert storage.stale_accounts() == {AID}
+    clock.t += 600
+    n = len(fake.calls)
+    assert await tracker.poll_all() == 0
+    assert "ships/stats/" in [p for p, _ in fake.calls[n:]] and storage.stale_accounts() == set()
+
+
+async def test_battles_and_battle_commands():
+    fake, clock, storage, tracker, app = make_env()
+    await app.handle(USER, "绑定 Example_Player")
+    clock.t += 600
+    fake.play(1, dmg=150000, team="pvp_div2")
+    await tracker.poll_all()
+    clock.t += 600
+    fake.play(2, dmg=90000, w=0, l=1, sv=0)
+    await tracker.poll_all()
+    out = await app.handle(USER, "场次 今天")
+    assert "【场次 · 今天】" in out and "2 场 1胜1负" in out and "大和（随机·双排）" in out
+    out = await app.handle(USER, "单场 今天 按伤害")
+    assert "第 1 / 共 2 场" in out and "伤害 150,000" in out and "侦察伤害" in out
+    assert "第 2 / 共 2 场" in await app.handle(USER, "单场 2")
+    assert "只有 2 场符合条件" in await app.handle(USER, "单场 5")
+    assert "没有名字含“岛风”" in await app.handle(USER, "场次 船=岛风")
+    # @mention reads the mentioned user's binding
+    assert "对方还没有绑定" in await app.handle("OneBot V11:2", "场次", mentions=["OneBot V11:3"])
+    assert "【场次" in await app.handle("OneBot V11:2", "场次 今天", mentions=[USER])
+
+
+async def test_ai_invocation_gets_caption():
+    class R:
+        async def render(self, html):
+            return b"PNG"
+
+    fake, clock, storage, tracker, app = make_env(renderer=R())
+    await app.handle(USER, "绑定 Example_Player")
+    assert await app.handle(USER, "Example_Player") == b"PNG"
+    image, caption = await app.handle(USER, "Example_Player", ai=True)
+    assert image == b"PNG" and caption.startswith("Example_Player 总战绩：随机 1,000 场")
+    clock.t += 600
+    fake.play(1, dmg=150000)
+    await tracker.poll_all()
+    _, caption = await app.handle(USER, "单场", ai=True)
+    assert caption.startswith("Example_Player【单场") and "伤害 150,000" in caption
+
+
+def test_storage_migrates_old_ship_state(tmp_path):
+    import sqlite3
+    path = tmp_path / "v026.sqlite3"
+    db = sqlite3.connect(path)
+    cols = ", ".join(f"{c} INTEGER NOT NULL" for c in ("battles", "wins", "losses", "damage", "frags", "xp",
+                                                        "survived", "hits", "shots"))
+    db.execute(f"CREATE TABLE ship_state (account_id INTEGER NOT NULL, ship_id INTEGER NOT NULL, mode TEXT NOT NULL, "
+               f"{cols}, PRIMARY KEY (account_id, ship_id, mode))")
+    db.execute("INSERT INTO ship_state VALUES (1, 7, 'pvp', 10, 5, 5, 900, 9, 90, 4, 0, 0)")
+    db.commit()
+    db.close()
+    storage = Storage(path)
+    assert storage.ship_states(1)[(7, "pvp")].damage == 900
+    assert storage.ship_meta(1) == {(7, "pvp"): (False, None)} and storage.stale_accounts() == {1}
+    storage.close()

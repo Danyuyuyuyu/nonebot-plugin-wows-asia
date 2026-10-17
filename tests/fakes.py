@@ -15,7 +15,13 @@ SHIPS_INFO = {
 
 def stat(b, w, l, dmg, fr, xp, sv, hits=0, shots=0):
     return {"battles": b, "wins": w, "losses": l, "damage_dealt": dmg, "frags": fr, "xp": xp,
-            "survived_battles": sv, "main_battery": {"hits": hits, "shots": shots}}
+            "survived_battles": sv, "main_battery": {"hits": hits, "shots": shots, "frags": fr * 3 // 4},
+            "damage_scouting": b * 21000, "art_agro": b * 900000, "torpedo_agro": b * 60000,
+            "ships_spotted": b * 9 // 10, "planes_killed": b * 2, "capture_points": b, "dropped_capture_points": b // 2,
+            "torpedoes": {"hits": b // 4, "shots": b * 3, "frags": fr // 8},
+            "second_battery": {"hits": b * 5, "shots": b * 40, "frags": fr // 16},
+            "max_damage_dealt": dmg // b * 3 if b else 0, "max_frags_battle": 5 if b else 0,
+            "max_xp": xp // b * 3 if b else 0}
 
 
 def account(nickname="Example_Player", battles=1000, hidden=False, lbt=1792123200):
@@ -90,7 +96,7 @@ class FakeWG:
         return httpx.Response(404)
 
     def play(self, ship_id, mode="pvp", b=1, w=1, l=0, dmg=100000, fr=2, xp=2000, sv=1, hits=0, shots=0,
-             team="pvp_solo"):
+             team="pvp_solo", scouting=30000, potential=1200000, spotted=2, planes=3, torp=(1, 6)):
         for s in self.ships:
             if s["ship_id"] == ship_id:
                 cur = s.get(mode) or stat(0, 0, 0, 0, 0, 0, 0)
@@ -99,6 +105,16 @@ class FakeWG:
                     cur[k] += v
                 cur["main_battery"]["hits"] += hits
                 cur["main_battery"]["shots"] += shots
+                cur["main_battery"]["frags"] += fr
+                cur["damage_scouting"] += scouting
+                cur["art_agro"] += potential
+                cur["ships_spotted"] += spotted
+                cur["planes_killed"] += planes
+                cur["torpedoes"]["hits"] += torp[0]
+                cur["torpedoes"]["shots"] += torp[1]
+                cur["max_damage_dealt"] = max(cur["max_damage_dealt"], dmg // max(b, 1))
+                cur["max_frags_battle"] = max(cur["max_frags_battle"], fr)
+                cur["max_xp"] = max(cur["max_xp"], xp // max(b, 1))
                 s[mode] = cur
                 if mode == "pvp" and team:
                     block = s.get(team) or {"battles": 0}

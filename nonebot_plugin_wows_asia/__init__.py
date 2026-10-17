@@ -23,7 +23,16 @@ from .tracker import Tracker  # noqa: E402
 
 __plugin_meta__ = PluginMetadata(
     name="WoWS 亚服战绩",
-    description="查询 WoWS 亚服战绩：总战绩卡、最近战绩卡（含逐场记录）、账号绑定",
+    # nonebot-plugin-aigf-master 把这一行原样写进 LLM 的“可用功能”清单，所以写成调用说明
+    description=(
+        "窝窝(WoWS)亚服战绩。参数空格分隔、顺序随意。wows [谁] 总战绩；wows 最近 [谁] 近7天汇总；"
+        "wows 场次 [谁] [筛选] 列出场次；wows 单场 [谁] [筛选|序号] 单场详情（取排序后第1场，默认最近一场）。"
+        "谁=我(默认,需传 user_id)/玩家昵称/id 账号ID/@群友。"
+        "筛选：今天|昨天|前天|近N天|MM-DD|MM-DD~MM-DD；船=船名；随机|排位|单野|组队|双排|三排；胜|负；"
+        "按伤害|按击沉|按经验|按侦察|按潜在；前N。"
+        "例：今天伤害最高的一把→wows 单场 今天 按伤害；昨天打的大和→wows 场次 昨天 船=大和。"
+        "只能查到绑定/首次查询之后记录的场次；未绑定时先让用户发 wows 绑定 昵称"
+    ),
     usage=HELP,
     type="application",
     homepage="https://github.com/Danyuyuyuyu/nonebot-plugin-wows-asia",
@@ -53,6 +62,9 @@ __plugin_meta__ = PluginMetadata(
                     Example(exec="wows 最近", description="查询当前调用身份绑定账号的最近战绩"),
                     Example(exec="wows 张三", description="查询亚服玩家张三的总战绩"),
                     Example(exec="wows id 2000000001", description="按账号 ID 查询总战绩"),
+                    Example(exec="wows 单场 今天 按伤害", description="当前调用身份今天伤害最高的一场的详情"),
+                    Example(exec="wows 场次 昨天 船=大和", description="当前调用身份昨天打的所有大和"),
+                    Example(exec="wows 场次 近3天 排位", description="近 3 天的排位场次列表"),
                 ],
             )
         ],
@@ -80,9 +92,28 @@ def user_key(bot: Bot, event: Event) -> str | None:
         return None
 
 
+def mention_keys(bot: Bot, args: Message) -> list[str]:
+    """@-segments in the arguments -> user keys, so "/wows 最近 @某人" reads that user's binding."""
+    keys = []
+    try:
+        for seg in args:
+            qq = seg.data.get("qq") if seg.type == "at" and isinstance(seg.data, dict) else None
+            if qq and str(qq) != "all":
+                keys.append(f"{bot.adapter.get_name()}:{qq}")
+    except Exception:
+        return []
+    return keys
+
+
 @wows.handle()
 async def handle_wows(bot: Bot, event: Event, args: Message = CommandArg()):
-    reply = await app.handle(user_key(bot, event), args.extract_plain_text())
+    # nonebot-plugin-aigf-master marks the events it synthesises; add a text line so the LLM gets exact numbers
+    ai = bool(getattr(event, "aigf_synthetic", False))
+    reply = await app.handle(user_key(bot, event), args.extract_plain_text(), mentions=mention_keys(bot, args), ai=ai)
+    if isinstance(reply, tuple):
+        image, caption = reply
+        await (UniMessage.image(raw=image, mimetype="image/png") + UniMessage.text("\n" + caption)).send()
+        await wows.finish()
     if isinstance(reply, bytes):
         await UniMessage.image(raw=reply, mimetype="image/png").send()
         await wows.finish()

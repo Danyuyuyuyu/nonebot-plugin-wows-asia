@@ -9,6 +9,14 @@ from .stats import STAT_FIELDS, Stat
 _COLS = ", ".join(STAT_FIELDS)
 _Q = ", ".join("?" * len(STAT_FIELDS))
 
+_STATDEF = ", ".join(f"{c} INTEGER NOT NULL DEFAULT 0" for c in STAT_FIELDS)
+# Columns added after the first release: (table, column, definition). Applied with ALTER TABLE on old databases.
+_LATER = [("battle_record", "solo", "INTEGER"), ("battle_record", "div2", "INTEGER"), ("battle_record", "div3", "INTEGER"),
+          ("battle_record", "full", "INTEGER NOT NULL DEFAULT 0"), ("battle_record", "best", "INTEGER NOT NULL DEFAULT 0"),
+          ("ship_state", "full", "INTEGER NOT NULL DEFAULT 0"), ("ship_state", "best_damage", "INTEGER"),
+          ("ship_state", "best_frags", "INTEGER"), ("ship_state", "best_xp", "INTEGER")]
+BEST_DAMAGE, BEST_FRAGS, BEST_XP = 1, 2, 4
+
 SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS binding (user_key TEXT PRIMARY KEY, account_id INTEGER NOT NULL,
     nickname TEXT NOT NULL, bound_at INTEGER NOT NULL);
@@ -16,11 +24,10 @@ CREATE TABLE IF NOT EXISTS tracked (account_id INTEGER PRIMARY KEY, nickname TEX
     baseline_at INTEGER, last_battle_time INTEGER NOT NULL DEFAULT 0, last_polled_at INTEGER NOT NULL DEFAULT 0,
     last_requested_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS ship_state (account_id INTEGER NOT NULL, ship_id INTEGER NOT NULL, mode TEXT NOT NULL,
-    {", ".join(f"{c} INTEGER NOT NULL" for c in STAT_FIELDS)}, PRIMARY KEY (account_id, ship_id, mode));
+    {_STATDEF}, PRIMARY KEY (account_id, ship_id, mode));
 CREATE TABLE IF NOT EXISTS battle_record (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL,
     captured_at INTEGER NOT NULL, prev_at INTEGER NOT NULL, ship_id INTEGER NOT NULL, mode TEXT NOT NULL,
-    {", ".join(f"{c} INTEGER NOT NULL" for c in STAT_FIELDS)}, career_avg_damage REAL,
-    solo INTEGER, div2 INTEGER, div3 INTEGER);
+    {_STATDEF}, career_avg_damage REAL);
 CREATE INDEX IF NOT EXISTS idx_record_account_time ON battle_record (account_id, captured_at);
 """
 
@@ -45,6 +52,8 @@ class Record:
     stat: Stat
     career_avg_damage: float | None
     division: tuple[int, int, int] | None = None  # random only: (solo, div2, div3) battles; None = unknown
+    full: bool = True  # detail fields (scouting, potential...) valid; False for pre-0.2.7 snapshots
+    best: int = 0  # BEST_* bitmask: this window raised the ship's personal best
 
 
 class Storage:
@@ -55,10 +64,11 @@ class Storage:
         self._lock = threading.Lock()
         with self._lock:
             self._db.executescript(SCHEMA)
-            cols = {row[1] for row in self._db.execute("PRAGMA table_info(battle_record)")}
-            for col in ("solo", "div2", "div3"):  # databases created before 0.2.6
+            later = [(t, c, "INTEGER NOT NULL DEFAULT 0") for t in ("ship_state", "battle_record") for c in STAT_FIELDS]
+            for table, col, definition in later + _LATER:  # upgrade databases from older versions in place
+                cols = {row[1] for row in self._db.execute(f"PRAGMA table_info({table})")}
                 if col not in cols:
-                    self._db.execute(f"ALTER TABLE battle_record ADD COLUMN {col} INTEGER")
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
             self._db.commit()
 
     def close(self) -> None:
@@ -130,25 +140,45 @@ class Storage:
         rows = self._all(f"SELECT ship_id, mode, {_COLS} FROM ship_state WHERE account_id=?", (account_id,))
         return {(r[0], r[1]): Stat(*r[2:]) for r in rows}
 
-    def save_snapshot(self, account_id: int, states: dict[tuple[int, str], Stat], records: list[Record]) -> None:
+    def ship_meta(self, account_id: int) -> dict[tuple[int, str], tuple[bool, tuple[int, int, int] | None]]:
+        """(detail fields valid, stored personal bests) per ship/mode."""
+        rows = self._all("SELECT ship_id, mode, full, best_damage, best_frags, best_xp FROM ship_state "
+                         "WHERE account_id=?", (account_id,))
+        return {(r[0], r[1]): (bool(r[2]), None if r[3] is None else (r[3], r[4], r[5])) for r in rows}
+
+    def stale_accounts(self) -> set[int]:
+        """Accounts whose snapshot predates the detail fields: re-snapshot once without waiting for a battle."""
+        return {r[0] for r in self._all("SELECT DISTINCT account_id FROM ship_state WHERE full=0")}
+
+    def mark_full(self, account_id: int) -> None:
+        self._run("UPDATE ship_state SET full=1 WHERE account_id=? AND full=0", (account_id,))
+
+    def save_snapshot(self, account_id: int, states: dict[tuple[int, str], Stat], records: list[Record],
+                      bests: dict[tuple[int, str], tuple[int, int, int]] | None = None) -> None:
+        bests = bests or {}
         with self._lock:
             for (ship_id, mode), stat in states.items():
-                self._db.execute(f"INSERT OR REPLACE INTO ship_state (account_id, ship_id, mode, {_COLS}) "
-                                 f"VALUES (?,?,?,{_Q})", (account_id, ship_id, mode, *stat.as_tuple()))
+                best = bests.get((ship_id, mode)) or (None, None, None)
+                self._db.execute(f"INSERT OR REPLACE INTO ship_state (account_id, ship_id, mode, {_COLS}, full, "
+                                 f"best_damage, best_frags, best_xp) VALUES (?,?,?,{_Q},1,?,?,?)",
+                                 (account_id, ship_id, mode, *stat.as_tuple(), *best))
             for rec in records:
                 self._db.execute(f"INSERT INTO battle_record (account_id, captured_at, prev_at, ship_id, mode, "
-                                 f"{_COLS}, career_avg_damage, solo, div2, div3) VALUES (?,?,?,?,?,{_Q},?,?,?,?)",
+                                 f"{_COLS}, career_avg_damage, solo, div2, div3, full, best) "
+                                 f"VALUES (?,?,?,?,?,{_Q},?,?,?,?,?,?)",
                                  (rec.account_id, rec.captured_at, rec.prev_at, rec.ship_id, rec.mode,
-                                  *rec.stat.as_tuple(), rec.career_avg_damage, *(rec.division or (None,) * 3)))
+                                  *rec.stat.as_tuple(), rec.career_avg_damage, *(rec.division or (None,) * 3),
+                                  int(rec.full), rec.best))
             self._db.commit()
 
     def records(self, account_id: int, since: int) -> list[Record]:
-        rows = self._all(f"SELECT account_id, captured_at, prev_at, ship_id, mode, {_COLS}, career_avg_damage, solo, div2, div3 "
-                         "FROM battle_record WHERE account_id=? AND captured_at>=? ORDER BY captured_at DESC, id DESC",
-                         (account_id, since))
+        rows = self._all(f"SELECT account_id, captured_at, prev_at, ship_id, mode, {_COLS}, career_avg_damage, "
+                         "solo, div2, div3, full, best FROM battle_record WHERE account_id=? AND captured_at>=? "
+                         "ORDER BY captured_at DESC, id DESC", (account_id, since))
         n = len(STAT_FIELDS)
         return [Record(r[0], r[1], r[2], r[3], r[4], Stat(*r[5:5 + n]), r[5 + n],
-                       None if r[6 + n] is None else tuple(r[6 + n:9 + n])) for r in rows]
+                       None if r[6 + n] is None else tuple(r[6 + n:9 + n]), bool(r[9 + n]), r[10 + n] or 0)
+                for r in rows]
 
     def prune_records(self, before: int) -> None:
         self._run("DELETE FROM battle_record WHERE captured_at<?", (before,))

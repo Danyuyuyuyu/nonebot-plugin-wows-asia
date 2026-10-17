@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 from .api import WowsApi
 from .commands import WowsError
-from .stats import DIV_MODES, Stat, num, ship_states
-from .storage import Record, Storage
+from .stats import DIV_MODES, Stat, num, ship_bests, ship_states
+from .storage import BEST_DAMAGE, BEST_FRAGS, BEST_XP, Record, Storage
 
 RETRY_WINDOW = 3600  # keep re-checking an account for an hour if WG stats lag behind last_battle_time
 MIN_REFRESH_GAP = 60
@@ -54,6 +54,13 @@ def split_divisions(deltas: list[tuple[tuple[int, str], Stat, float | None]],
         ok = mode == "pvp" and div is not None and sum(div) == delta.battles
         out.append(((ship_id, mode), delta, career, tuple(div) if ok else None))
     return out
+
+
+def best_flags(old: tuple[int, int, int] | None, new: tuple[int, int, int] | None) -> int:
+    """Bitmask of personal bests raised between two snapshots (unknown old -> no flags)."""
+    if old is None or new is None:
+        return 0
+    return sum(bit for bit, o, n in zip((BEST_DAMAGE, BEST_FRAGS, BEST_XP), old, new) if n > o)
 
 
 class Tracker:
@@ -106,16 +113,23 @@ class Tracker:
         if ships is None:
             self.storage.mark_polled(account_id, now, None, False)
             return RefreshResult(hidden=True)
-        new = ship_states(ships)
+        new, bests = ship_states(ships), ship_bests(ships)
         if not has_baseline:
-            self.storage.save_snapshot(account_id, new, [])
+            self.storage.save_snapshot(account_id, new, [], bests)
             self.storage.mark_polled(account_id, now, last_battle_time or 0, True)
             return RefreshResult(baseline_created=True)
-        deltas, changed = diff_states(self.storage.ship_states(account_id), new)
+        old, meta = self.storage.ship_states(account_id), self.storage.ship_meta(account_id)
+        deltas, changed = diff_states(old, new)
+        # rows saved before 0.2.7 have no detail fields: rewrite them now so the next battle is complete
+        changed.update({k: v for k, v in new.items() if k in meta and not meta[k][0]})
         prev_at = tracked.last_polled_at or tracked.baseline_at or now
-        records = [Record(account_id, now, prev_at, ship_id, mode, delta, career, div)
-                   for (ship_id, mode), delta, career, div in split_divisions(deltas)]
-        self.storage.save_snapshot(account_id, changed, records)
+        records = []
+        for (ship_id, mode), delta, career, div in split_divisions(deltas):
+            full, old_best = meta.get((ship_id, mode), (True, None))
+            records.append(Record(account_id, now, prev_at, ship_id, mode, delta, career, div,
+                                  full=full, best=best_flags(old_best, bests.get((ship_id, mode)))))
+        self.storage.save_snapshot(account_id, changed, records, bests)
+        self.storage.mark_full(account_id)
         marker = last_battle_time
         if marker is not None and not records and now - marker < RETRY_WINDOW:
             marker = None  # WG may not have published ship stats yet: retry next poll
@@ -150,13 +164,14 @@ class Tracker:
         if not tracked:
             return 0
         infos = await self.api.account_info([t.account_id for t in tracked], full=False)
+        stale = self.storage.stale_accounts()
         total = 0
         for t in tracked:
             info = infos.get(t.account_id)
             if not info or info.get("hidden_profile") is True:
                 continue
             lbt = num(info.get("last_battle_time"))
-            if t.baseline_at is not None and (lbt is None or lbt <= t.last_battle_time):
+            if t.baseline_at is not None and (lbt is None or lbt <= t.last_battle_time) and t.account_id not in stale:
                 continue
             try:
                 total += (await self.refresh(t.account_id, last_battle_time=lbt, force=True)).new_records

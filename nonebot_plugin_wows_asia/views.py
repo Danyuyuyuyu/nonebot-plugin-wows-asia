@@ -92,6 +92,7 @@ class BattleRow:
     stat: Stat
     career_avg_damage: float | None
     team: str = ""  # 单野 / 双排 / 三排, or "单野2 双排1" for merged rows; "" = unknown or ranked
+    date: str = ""  # MM-DD, shown in flat (sorted) lists
 
 
 @dataclass
@@ -278,3 +279,201 @@ def state_newbie(who: Identity, random: Stat, threshold: int) -> StateView:
         f"还没有随机战斗记录，打满 {threshold} 场后显示完整卡片。"
     return StateView("newbie", "总战绩", who, f"随机 {random.battles} 场", "场数还比较少",
                      f"随机战斗目前只有 {random.battles} 场，胜率和场均数据波动很大，暂不展示舰种和组队分析。", tip)
+
+
+# ---- 场次 / 单场 ----
+SORT_CN = {"damage": "伤害", "frags": "击沉", "xp": "经验", "scouting": "侦察伤害", "potential": "潜在伤害"}
+SORT_ATTR = {"damage": "damage", "frags": "frags", "xp": "xp", "scouting": "scouting", "potential": "potential"}
+TEAM_FILTER_CN = {"solo": "单野", "div": "组队", "div2": "双排", "div3": "三排"}
+
+
+@dataclass
+class Picked:
+    rows: list[BattleRow]
+    records: list[Record]
+    desc: str  # human-readable filter, e.g. "昨天 · 大和 · 随机"
+    empty_reason: str = ""  # set when nothing matched
+
+
+def _period_days(period: tuple | None, today):
+    if period is None:
+        return None, None
+    if period[0] == "ago":
+        return today - timedelta(days=period[1]), today - timedelta(days=period[2])
+
+    def resolve(md):
+        m, d = md
+        for year in (today.year, today.year - 1):
+            try:
+                day = today.replace(year=year, month=m, day=d)
+            except ValueError:
+                continue
+            if day <= today:
+                return day
+        return today.replace(year=today.year - 1, month=m, day=min(d, 28))
+
+    a, b = resolve(period[1]), resolve(period[2])  # most recent past occurrence of each date
+    return min(a, b), max(a, b)
+
+
+def period_label(period: tuple | None, today) -> str:
+    if period is None:
+        return ""
+    if period[0] == "ago":
+        a, b = period[1], period[2]
+        if a == b:
+            return {0: "今天", 1: "昨天", 2: "前天"}.get(a, f"{(today - timedelta(days=a)):%m-%d}")
+        return f"近 {a + 1} 天" if b == 0 else ""
+    start, end = _period_days(period, today)
+    return f"{start:%m-%d}" if start == end else f"{start:%m-%d}~{end:%m-%d}"
+
+
+def _team_match(r: Record, team: str) -> bool:
+    if r.mode != "pvp" or not r.division:
+        return False
+    solo, d2, d3 = r.division
+    n = r.stat.battles
+    return {"solo": solo, "div": d2 + d3, "div2": d2, "div3": d3}[team] == n
+
+
+def filter_records(records: list[Record], flt, infos: dict[int, ShipInfo], now: int, *,
+                   default_days: int | None = 7) -> Picked:
+    today = day_of(now)
+    period = flt.period if flt.period is not None else (("ago", default_days - 1, 0) if default_days else None)
+    start, end = _period_days(period, today)
+    parts = [period_label(period, today) or f"{start:%m-%d}~{end:%m-%d}"] if period else ["全部记录"]
+    out = [r for r in records if start is None or start <= day_of(r.captured_at) <= end]
+    if flt.ship:
+        key = flt.ship.casefold()
+        names = {sid: info.name for sid, info in infos.items() if info is not None}
+        ids = {sid for sid, name in names.items() if key in name.casefold()}
+        out = [r for r in out if r.ship_id in ids]
+        matched = sorted({names[r.ship_id] for r in out})
+        parts.append(" / ".join(clean(n, 24) for n in matched[:3]) if matched else clean(flt.ship, 24))
+    if flt.mode:
+        out = [r for r in out if r.mode == flt.mode]
+        if not flt.team:
+            parts.append(MODE_CN[flt.mode])
+    if flt.team:
+        out = [r for r in out if _team_match(r, flt.team)]
+        parts.append("随机 · " + TEAM_FILTER_CN[flt.team])
+    if flt.result:
+        out = [r for r in out if (r.stat.wins if flt.result == "win" else r.stat.losses) == r.stat.battles]
+        parts.append("胜场" if flt.result == "win" else "负场")
+    if flt.sort:
+        attr = SORT_ATTR[flt.sort]
+        out = sorted(out, key=lambda r: (getattr(r.stat, attr) / r.stat.battles, r.captured_at), reverse=True)
+        if flt.sort in ("scouting", "potential"):
+            out = [r for r in out if r.full]  # pre-0.2.7 records have no such data
+        parts.append(f"按{SORT_CN[flt.sort]}排序")
+    reason = ""
+    if not out:
+        if not records:
+            reason = "还没有记录到任何场次"
+        elif flt.ship and not any(r.ship_id in {s for s, i in infos.items() if i and flt.ship.casefold() in i.name.casefold()}
+                                  for r in records):
+            reason = f"记录里没有名字含“{clean(flt.ship, 24)}”的船"
+        else:
+            reason = "没有符合条件的场次"
+    rows = [battle_row(r, infos, with_date=True) for r in out]
+    return Picked(rows, out, " · ".join(p for p in parts if p), reason)
+
+
+def battle_row(r: Record, infos: dict[int, ShipInfo], with_date: bool = False) -> BattleRow:
+    name, tname, tier = ship_label(infos.get(r.ship_id), r.ship_id)
+    merged_start = fmt_time(r.prev_at) if r.stat.battles > 1 and day_of(r.prev_at) == day_of(r.captured_at) else ""
+    row = BattleRow(fmt_time(r.captured_at), merged_start, MODE_CN.get(r.mode, r.mode), name, tname, tier,
+                    r.stat, r.career_avg_damage, team_label(r.division))
+    if with_date:
+        row.date = fmt_time(r.captured_at, "%m-%d")
+    return row
+
+
+@dataclass
+class BattlesView:
+    who: Identity
+    desc: str
+    summary: Stat
+    base: Stat  # comparison baseline (single ship -> that ship's career, otherwise random career)
+    base_label: str
+    rows: list[BattleRow]
+    groups: list[DayGroup]  # used when not sorted (grouped by day); empty when sorted
+    sorted_by: str  # "" or 伤害/击沉/...
+    hidden_rows: int
+    tracking_since: str
+    generated_at: int
+    teams: tuple[int, int, int] | None = None
+
+
+def build_battles(who: Identity, picked: Picked, flt, career: Stat, ship_states: dict, baseline_at: int,
+                  now: int, max_rows: int = 15) -> BattlesView:
+    recs = picked.records
+    summary = sum((r.stat for r in recs), Stat())
+    ships = {(r.ship_id, r.mode) for r in recs}
+    base, base_label = career, "随机生涯"
+    if len({sid for sid, _ in ships}) == 1:
+        sid = next(iter(ships))[0]
+        mode = "pvp" if (sid, "pvp") in ships else next(iter(ships))[1]
+        if (sid, mode) in ship_states:
+            base, base_label = ship_states[(sid, mode)], f"{picked.rows[0].ship} {MODE_CN.get(mode, mode)}生涯"
+    limit = min(flt.limit or max_rows, max_rows)
+    shown_recs, shown_rows = recs[:limit], picked.rows[:limit]
+    groups = []
+    if not flt.sort:
+        by_day: dict = {}
+        for r, row in zip(shown_recs, shown_rows):
+            row.date = ""
+            by_day.setdefault(day_of(r.captured_at), []).append((r, row))
+        for d, items in by_day.items():
+            label = {day_of(now): "今天", day_of(now) - timedelta(days=1): "昨天"}.get(d, "")
+            groups.append(DayGroup(f"{label} {d:%m-%d}".strip(), sum((r.stat for r, _ in items), Stat()),
+                                   [row for _, row in items]))
+    known = [r.division for r in recs if r.division]
+    teams = tuple(sum(d[i] for d in known) for i in range(3)) if known else None
+    return BattlesView(who, picked.desc, summary, base, base_label, shown_rows, groups,
+                       SORT_CN.get(flt.sort or "", ""), max(len(recs) - limit, 0),
+                       fmt_time(baseline_at, "%m-%d %H:%M"), now, teams)
+
+
+@dataclass
+class BattleDetailView:
+    who: Identity
+    row: BattleRow
+    record: Record
+    when: str  # 10-15 14:25（或 14:05–14:25 合并）
+    ship_career: Stat | None
+    history: list[tuple[str, float, bool]]  # (label, per-battle damage, is_this) oldest -> newest
+    rank: tuple[int, int] | None  # (rank by damage, out of N) among history
+    position: str  # e.g. "今天 · 按伤害排序第 1 / 共 6 场"
+    generated_at: int
+
+
+def build_battle(who: Identity, picked: Picked, index: int, all_records: list[Record], ship_states: dict,
+                 now: int, history_size: int = 10) -> BattleDetailView:
+    rec, row = picked.records[index], picked.rows[index]
+    same = [r for r in all_records if r.ship_id == rec.ship_id and r.mode == rec.mode]
+    same = sorted(same, key=lambda r: r.captured_at)
+    pos = next((i for i, r in enumerate(same) if r is rec or (r.captured_at, r.stat) == (rec.captured_at, rec.stat)), None)
+    if pos is None:
+        window = same[-history_size:]
+    else:
+        lo = max(0, min(pos - history_size // 2, len(same) - history_size))
+        window = same[lo:lo + history_size]
+    history = [(fmt_time(r.captured_at, "%m-%d"), r.stat.damage / r.stat.battles,
+                (r.captured_at, r.stat) == (rec.captured_at, rec.stat)) for r in window]
+    rank = None
+    if len(history) >= 3 and any(h[2] for h in history):
+        mine = rec.stat.damage / rec.stat.battles
+        rank = (1 + sum(1 for _, v, this in history if v > mine and not this), len(history))
+    if rec.stat.battles > 1 and row.time_end:
+        when = f"{fmt_time(rec.captured_at, '%m-%d')} {row.time_end}–{row.time}"
+    else:
+        when = fmt_time(rec.captured_at, "%m-%d %H:%M")
+    position = f"{picked.desc} · 第 {index + 1} / 共 {len(picked.records)} 场"
+    return BattleDetailView(who, row, rec, when, ship_states.get((rec.ship_id, rec.mode)), history, rank, position, now)
+
+
+def state_nomatch(who: Identity, title: str, desc: str, reason: str, baseline_at: int) -> StateView:
+    return StateView("idle", title, who, desc, reason,
+                     f"只能查到 {fmt_time(baseline_at, '%m-%d %H:%M')} 开始记录之后的场次，条件：{desc}。",
+                     "可以换个时间或去掉部分条件再试，例如：/wows 场次 近7天")
