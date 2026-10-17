@@ -348,7 +348,7 @@ def filter_records(records: list[Record], flt, infos: dict[int, ShipInfo], now: 
     out = [r for r in records if start is None or start <= day_of(r.captured_at) <= end]
     if flt.ship:
         key = flt.ship.casefold()
-        names = {sid: info.name for sid, info in infos.items() if info is not None}
+        names = {sid: ship_label(infos.get(sid), sid)[0] for sid in {r.ship_id for r in records}}
         ids = {sid for sid, name in names.items() if key in name.casefold()}
         out = [r for r in out if r.ship_id in ids]
         matched = sorted({names[r.ship_id] for r in out})
@@ -373,8 +373,7 @@ def filter_records(records: list[Record], flt, infos: dict[int, ShipInfo], now: 
     if not out:
         if not records:
             reason = "还没有记录到任何场次"
-        elif flt.ship and not any(r.ship_id in {s for s, i in infos.items() if i and flt.ship.casefold() in i.name.casefold()}
-                                  for r in records):
+        elif flt.ship and not any(r.ship_id in ids for r in records):
             reason = f"记录里没有名字含“{clean(flt.ship, 24)}”的船"
         else:
             reason = "没有符合条件的场次"

@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from datetime import date as calendar_date
 
 HELP = """WoWS 亚服战绩查询
 /wows 玩家昵称　　查总战绩卡
@@ -85,6 +86,10 @@ def _date(m: str, d: str) -> tuple[int, int]:
     month, day = int(m), int(d)
     if not (1 <= month <= 12 and 1 <= day <= 31):
         raise WowsError(f"日期 {m}-{d} 无效。" + FILTER_USAGE)
+    try:
+        calendar_date(2000, month, day)  # leap year keeps 02-29 valid for historical queries
+    except ValueError:
+        raise WowsError(f"日期 {m}-{d} 无效。" + FILTER_USAGE) from None
     return month, day
 
 
